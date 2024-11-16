@@ -125,6 +125,8 @@ def llama_finetuning():
     )
 
     # Training arguments
+    # TODO
+    # adjust gradient accumulation
     training_args = TrainingArguments(
         output_dir="./llama3-glue",
         per_device_train_batch_size=2,
