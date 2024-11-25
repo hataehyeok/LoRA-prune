@@ -1,4 +1,4 @@
-/utils/config.py
-/utils/ex.py
+config.py
+ex.py
 output.log
 __pycache__/
