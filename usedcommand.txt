@@ -40,3 +40,5 @@ ERROR
 
 
 
+pip install tensorboardX
+
