@@ -80,7 +80,7 @@ def llama_finetuning():
             "inputs": "Can you please let us know more details about your ",
         })
         print(output)
-
+    
     model_id = "meta-llama/Meta-Llama-3-8B"
     model, tokenizer = get_model_and_tokenizer(model_id)
     model.to(device)
