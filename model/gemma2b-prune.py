@@ -27,13 +27,13 @@ def get_model_and_tokenizer(model_id):
         bnb_4bit_use_double_quant=True
     )
     
-    with init_empty_weights():
-        model = AutoModelForCausalLM.from_pretrained(
-            model_id,
-            quantization_config=bnb_config,
-            device_map=None,
-            low_cpu_mem_usage=True
-        )
+    model = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        quantization_config=bnb_config,
+        device_map=None,
+        low_cpu_mem_usage=True,
+        llm_int8_enable_fp32_cpu_offload=True  # Enable FP32 CPU offload
+    )
     
     device_map = infer_auto_device_map(model, max_memory={0: "16GiB", "cpu": "32GiB"})
     model = AutoModelForCausalLM.from_pretrained(
@@ -45,8 +45,13 @@ def get_model_and_tokenizer(model_id):
     
     model.config.use_cache = False
     model.config.pretraining_tp = 1
-    model.config.hidden_activation = "gelu_pytorch_tanh"  # Ensure the correct activation function is set
+    model.config.hidden_activation = "gelu_pytorch_tanh"
     model.gradient_checkpointing_enable()
+    
+    # Ensure all parameters require gradients
+    for param in model.parameters():
+        param.requires_grad = True
+    
     return model, tokenizer
 
 def preprocess_function(examples):
@@ -90,12 +95,12 @@ def model_finetuning():
     # Training arguments
     training_args = TrainingArguments(
         output_dir="./gemma-glue",
-        per_device_train_batch_size=2,  # Reduce batch size
+        per_device_train_batch_size=1,  # Reduce batch size
         gradient_accumulation_steps=32,
         num_train_epochs=3,
         logging_steps=10,
         learning_rate=2e-4,
-        evaluation_strategy="steps",
+        eval_strategy="steps",  # Use eval_strategy instead of evaluation_strategy
         save_steps=500,
         save_total_limit=2,
         fp16=True
@@ -120,4 +125,6 @@ def model_finetuning():
 
 
 if __name__ == '__main__':
+    os.environ["TOKENIZERS_PARALLELISM"] = "false"
+    os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
     model_finetuning()
