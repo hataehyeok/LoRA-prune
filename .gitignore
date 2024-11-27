@@ -2,3 +2,6 @@ config.py
 ex.py
 output.log
 __pycache__/
+gemma-2b-it-sum-ko
+lora_adapter
+outputs
