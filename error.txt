@@ -44,4 +44,11 @@ ERROR
     os.environ["CUDA_VISIBLE_DEVICES"] = "0"
     https://github.com/huggingface/trl/issues/2338
 
-    
+
+3. Some parameters are on the meta device because they were offloaded to the cpu.
+    - out of memory
+    - https://huggingface.co/mistralai/Mixtral-8x7B-v0.1/discussions/25
+
+4. unsloth
+    - import torch; torch.version.cuda -> 12.4
+    - 

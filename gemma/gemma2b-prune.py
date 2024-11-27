@@ -21,14 +21,7 @@ def generate_prompt(example):
 
 def dataset_loading():
     dataset = load_dataset("daekeun-ml/naver-news-summarization-ko")
-    print(dataset)
-    print(dataset['train'][0])
-
     train_data = dataset['train']
-    print(train_data)
-    print("\n\n")
-    print(train_data[:1])
-    print(generate_prompt(train_data[:1])[0])
     return train_data
 
 def finetuning(train_data):
@@ -57,10 +50,10 @@ def finetuning(train_data):
 
     args = TrainingArguments(
         output_dir="outputs",
-        num_train_epochs = 1,
-        max_steps=3000,
+        num_train_epochs = 0.5,
+        max_steps=1000,
         per_device_train_batch_size=1,
-        gradient_accumulation_steps=4,
+        gradient_accumulation_steps=2,
         optim="paged_adamw_8bit",
         warmup_steps=0,
         learning_rate=2e-4,
