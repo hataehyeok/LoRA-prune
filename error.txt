@@ -48,7 +48,15 @@ ERROR
 3. Some parameters are on the meta device because they were offloaded to the cpu.
     - out of memory
     - https://huggingface.co/mistralai/Mixtral-8x7B-v0.1/discussions/25
+    
+    (1) -> reduce memory usage
+    (2) -> use only merge part from importing finetuned something
+    (3) -> unsloth
+    (3) -> DDP
+
 
 4. unsloth
     - import torch; torch.version.cuda -> 12.4
-    - 
+    - AttributeError: partially initialized module 'torchvision' has no attribute 'extension' (most likely due to a circular import)
+    - => didn't installed well I think
+
