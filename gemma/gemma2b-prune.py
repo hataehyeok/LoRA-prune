@@ -22,9 +22,10 @@ def generate_prompt(example):
 def dataset_loading():
     dataset = load_dataset("daekeun-ml/naver-news-summarization-ko")
     train_data = dataset['train']
-    return train_data
+    test_data = dataset['test']['document'][10]
+    return train_data, test_data
 
-def finetuning(train_data):
+def fine_tuning(train_data):
     lora_config = LoraConfig(
         r=6,
         lora_alpha = 8,
@@ -90,7 +91,64 @@ def finetuning(train_data):
     model = model.merge_and_unload()
     model.save_pretrained('gemma-2b-it-sum-ko')
 
+def model_test(test_data):
+    BASE_MODEL = "google/gemma-2b-it"
+    FINETUNE_MODEL = "./gemma-2b-it-sum-ko"
+
+    finetune_model = AutoModelForCausalLM.from_pretrained(FINETUNE_MODEL, device_map={"":0})
+    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
+
+    pipe_finetuned = pipeline("text-generation", model=finetune_model, tokenizer=tokenizer, max_new_tokens=512)
+
+    messages = [
+        {
+            "role": "user",
+            "content": "다음 글을 요약해주세요:\n\n{}".format(test_data)
+        }
+    ]
+
+    prompt = pipe_finetuned.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    outputs = pipe_finetuned(
+        prompt,
+        do_sample=True,
+        temperature=0.2,
+        top_k=50,
+        top_p=0.95,
+        add_special_tokens=True
+    )
+    print(outputs[0]["generated_text"][len(prompt):])
+
+
+def sample_test():
+    dataset = load_dataset("daekeun-ml/naver-news-summarization-ko")
+    BASE_MODEL = "google/gemma-2b-it"
+
+    model = AutoModelForCausalLM.from_pretrained(BASE_MODEL, device_map={"":0})
+    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
+    
+    doc = dataset['train']['document'][0]
+    pipe = pipeline("text-generation", model=model, tokenizer=tokenizer, max_new_tokens=512)
+    messages = [
+        {
+            "role": "user",
+            "content": "다음 글을 요약해주세요:\n\n{}".format(doc)
+        }
+    ]
+    prompt = pipe.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+
+    outputs = pipe(
+        prompt,
+        do_sample=True,
+        temperature=0.2,
+        top_k=50,
+        top_p=0.95,
+        add_special_tokens=True
+    )
+    print(outputs[0]["generated_text"][len(prompt):])
+
 
 if __name__ == '__main__':
-    train_data = dataset_loading()
-    finetuning(train_data)
+    train_data, test_data = dataset_loading()
+    # fine_tuning(train_data)
+    model_test(test_data)
+    # sample_test()

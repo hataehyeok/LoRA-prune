@@ -60,3 +60,7 @@ ERROR
     - AttributeError: partially initialized module 'torchvision' has no attribute 'extension' (most likely due to a circular import)
     - => didn't installed well I think
 
+5. NotADirectoryError huggingface_hub
+    - conda install -c conda-forge huggingface_hub
+    - https://stackoverflow.com/questions/78014793/huggingface-model-push-to-hubpeft-model-id-notadirectoryerror-errno-20-not
+
