@@ -1,0 +1,2 @@
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:  50%|█████     | 1/2 [00:04<00:04,  4.10s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:04<00:00,  1.83s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:04<00:00,  2.17s/it]
+Accuracy on first 10 test cases: 0.00%

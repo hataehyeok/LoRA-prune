@@ -21,17 +21,6 @@ The sentiment of the following text:
 {}<end_of_turn><eos>""".format(example['sentence'][i], label))
     return prompt_list
 
-def print_dataset():
-    dataset = load_dataset("glue", "sst2")
-    train_data = dataset['train']
-    test_data = dataset['test']
-    test_data_sample = test_data.select(range(10))
-
-    print(dataset)
-    print(test_data_sample)
-    print(test_data[:10])
-
-
 def dataset_loading():
     """Load the GLUE SST-2 dataset."""
     dataset = load_dataset("glue", "sst2")
@@ -85,7 +74,7 @@ def fine_tuning(train_data):
     trainer = SFTTrainer(
         model=model,
         train_dataset=train_data,
-        max_seq_length=128,
+        # max_seq_length=128,
         tokenizer=tokenizer,
         args=args,
         peft_config=lora_config,
@@ -240,7 +229,6 @@ def model_eval(test_data):
 
 
 if __name__ == '__main__':
-    # print_dataset()
     train_data, test_data = dataset_loading()
-    # fine_tuning(train_data)
-    model_eval(test_data)
+    fine_tuning(train_data)
+    # model_eval(test_data)

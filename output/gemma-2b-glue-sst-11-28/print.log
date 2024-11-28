@@ -1,0 +1,17 @@
+----------------------------------------------
+
+ax
+DatasetDict({
+    test: Dataset({
+        features: ['premise', 'hypothesis', 'label', 'idx'],
+        num_rows: 1104
+    })
+})
+Traceback (most recent call last):
+  File "/home/hth021002/lora-prune/gemma/print.py", line 15, in <module>
+    print_dataset()
+  File "/home/hth021002/lora-prune/gemma/print.py", line 12, in print_dataset
+    print(dataset['train'].select(range(10)))
+  File "/home/hth021002/miniconda3/envs/test/lib/python3.10/site-packages/datasets/dataset_dict.py", line 72, in __getitem__
+    return super().__getitem__(k)
+KeyError: 'train'
