@@ -7,6 +7,6 @@ lora_adapter
 outputs
 sklearn-env
 gemma-2b-it-sst2
-eval.log
-glue.log
-train.log
+gemma/eval.log
+gemma/glue.log
+gemma/train.log
