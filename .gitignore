@@ -6,3 +6,4 @@ gemma-2b-it-sum-ko
 lora_adapter
 outputs
 sklearn-env
+gemma-2b-it-sst2

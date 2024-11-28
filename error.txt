@@ -65,3 +65,7 @@ ERROR
     - conda install -c conda-forge huggingface_hub
     - https://stackoverflow.com/questions/78014793/huggingface-model-push-to-hubpeft-model-id-notadirectoryerror-errno-20-not
 
+6. pipelines sequentially on GPU
+    - You seem to be using the pipelines sequentially on GPU. In order to maximize efficiency please use a dataset
+    - it is recommended to use 'batch processing' or provide the entire dataset directly to the pipeline
+    - 
