@@ -21,6 +21,17 @@ The sentiment of the following text:
 {}<end_of_turn><eos>""".format(example['sentence'][i], label))
     return prompt_list
 
+def print_dataset():
+    dataset = load_dataset("glue", "sst2")
+    train_data = dataset['train']
+    test_data = dataset['test']
+    test_data_sample = test_data.select(range(10))
+
+    print(dataset)
+    print(test_data_sample)
+    print(test_data[:10])
+
+
 def dataset_loading():
     """Load the GLUE SST-2 dataset."""
     dataset = load_dataset("glue", "sst2")
@@ -184,7 +195,7 @@ def model_eval_2(test_data):
     finetune_model = AutoModelForCausalLM.from_pretrained(FINETUNE_MODEL, device_map={"": 0})
     tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
 
-    pipe_finetuned = pipeline("text-generation", model=finetune_model, tokenizer=tokenizer, batch_size=8, max_new_tokens=64)
+    pipe_finetuned = pipeline("text-generation", model=finetune_model, tokenizer=tokenizer, max_new_tokens=64)
 
     # Prepare prompts for the test dataset
     prompts = [
@@ -228,28 +239,30 @@ def model_eval_10case(test_data):
     BASE_MODEL = "google/gemma-2b-it"
     FINETUNE_MODEL = "./gemma-2b-it-sst2"
 
-    # Limit test data to the first 10 examples
-    test_data = test_data[:10]
+    # Reshape test_data into a list of dictionaries
+    test_data_sample = test_data.select(range(10))
 
     # Load the fine-tuned model and tokenizer
     finetune_model = AutoModelForCausalLM.from_pretrained(FINETUNE_MODEL, device_map={"": 0})
     tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
 
-    pipe_finetuned = pipeline("text-generation", model=finetune_model, tokenizer=tokenizer, batch_size=8, max_new_tokens=64)
+    pipe_finetuned = pipeline("text-generation", model=finetune_model, tokenizer=tokenizer, max_new_tokens=64)
 
     # Prepare prompts for the test dataset
     prompts = [
         f"<bos><start_of_turn>user\nThe sentiment of the following text:\n\n{example['sentence']}<end_of_turn>\n<start_of_turn>model\n"
-        for example in test_data
+        for example in test_data_sample
     ]
 
     # Generate predictions in batches
     outputs = pipe_finetuned(prompts, do_sample=True, temperature=0.7, top_k=50, top_p=0.9, add_special_tokens=True)
 
+    # import pdb; pdb.set_trace()
+
     # Process outputs and map to labels
     predictions = []
-    for output, example in zip(outputs, test_data):
-        generated_text = output["generated_text"]
+    for output, example in zip(outputs, test_data_sample):
+        generated_text = output[0]["generated_text"]
         prompt = f"<bos><start_of_turn>user\nThe sentiment of the following text:\n\n{example['sentence']}<end_of_turn>\n<start_of_turn>model\n"
         prediction_text = generated_text[len(prompt):].strip().lower()
 
@@ -261,7 +274,7 @@ def model_eval_10case(test_data):
             predictions.append(-1)  # Unknown/invalid prediction
 
     # Extract true labels
-    true_labels = [example['label'] for example in test_data]
+    true_labels = [example['label'] for example in test_data_sample]
 
     # Calculate accuracy, ignoring invalid predictions
     valid_predictions = [(pred, label) for pred, label in zip(predictions, true_labels) if pred != -1]
@@ -272,9 +285,9 @@ def model_eval_10case(test_data):
     else:
         print("No valid predictions to evaluate.")
 
-
 if __name__ == '__main__':
+    # print_dataset()
     train_data, test_data = dataset_loading()
     # fine_tuning(train_data)
-    model_eval_2(test_data)
-    # model_eval_10case(test_data)
+    # model_eval_2(test_data)
+    model_eval_10case(test_data)

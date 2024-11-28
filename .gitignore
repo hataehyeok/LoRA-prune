@@ -10,3 +10,4 @@ gemma-2b-it-sst2
 gemma/eval.log
 gemma/glue.log
 gemma/train.log
+gemma/print.log
