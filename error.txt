@@ -1,4 +1,5 @@
 python version -> above 3.9
+    Python 3.10.15 => for transformers, bitsandbytes
 torch
     conda install pytorch torchvision torchaudio pytorch-cuda=12.4 -c pytorch -c nvidia
     stable, linux, conda, python, cuda12.4

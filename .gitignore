@@ -5,3 +5,4 @@ __pycache__/
 gemma-2b-it-sum-ko
 lora_adapter
 outputs
+sklearn-env
