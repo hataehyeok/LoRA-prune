@@ -232,7 +232,7 @@ def model_eval_10case(test_data):
     test_data = test_data[:10]
 
     # Load the fine-tuned model and tokenizer
-    finetune_model = AutoModelForCausalLM.from_pretrained(FINETUNE_MODEL, device_map={"": 1})
+    finetune_model = AutoModelForCausalLM.from_pretrained(FINETUNE_MODEL, device_map={"": 0})
     tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
 
     pipe_finetuned = pipeline("text-generation", model=finetune_model, tokenizer=tokenizer, batch_size=8, max_new_tokens=64)
