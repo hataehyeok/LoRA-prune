@@ -71,16 +71,3 @@ ERROR
     - 
 
 
-
-TODO
-  1. training argument setting complete
-  2. LoRA exp setting
-
-ddp -> 실패
-gemma 2b -> 512에는 안올라감
-unsloth -> 실패
-
-gemma 2b -> 216에 대해 시도
-
-Q. gemma-2b or gemma-2b-it
-Q. unsloth or not

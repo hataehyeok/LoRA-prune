@@ -4,6 +4,8 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
 from peft import LoraConfig, PeftModel
 from trl import SFTTrainer
 from sklearn.metrics import accuracy_score
+from torch.nn.utils import prune
+import torch.nn as nn
 import os
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
@@ -57,7 +59,7 @@ def fine_tuning(train_data):
     args = TrainingArguments(
         output_dir="outputs",
         num_train_epochs=1,
-        max_steps=30,
+        # max_steps=30,
         per_device_train_batch_size=8,
         gradient_accumulation_steps=2,
         warmup_steps=100,
@@ -84,7 +86,6 @@ def fine_tuning(train_data):
     trainer.train()
 
     ADAPTER_MODEL = "lora_adapter"
-
     trainer.model.save_pretrained(ADAPTER_MODEL)
 
     model = AutoModelForCausalLM.from_pretrained(BASE_MODEL, device_map='auto', torch_dtype=torch.float16)
@@ -122,57 +123,6 @@ def model_test_print(test_data):
         add_special_tokens=True
     )
     print(outputs[0]["generated_text"][len(prompt):])
-
-def erer_model_eval(test_data):
-    """Evaluate the fine-tuned model on the test dataset."""
-
-    BASE_MODEL = "google/gemma-2b-it"
-    FINETUNE_MODEL = "./gemma-2b-it-sst2"
-
-    finetune_model = AutoModelForCausalLM.from_pretrained(FINETUNE_MODEL, device_map={"": 0})
-    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
-
-    pipe_finetuned = pipeline("text-generation", model=finetune_model, tokenizer=tokenizer, max_new_tokens=64)
-
-    predictions = []
-    true_labels = []
-
-    for example in test_data:
-        sentence = example['sentence']
-        true_label = example['label']
-        true_labels.append(true_label)
-
-        # Create prompt for evaluation
-        prompt = f"<bos><start_of_turn>user\nThe sentiment of the following text:\n\n{sentence}<end_of_turn>\n<start_of_turn>model\n"
-
-        # Generate model output
-        outputs = pipe_finetuned(
-            prompt,
-            do_sample=True,
-            temperature=0.7,
-            top_k=50,
-            top_p=0.9,
-            add_special_tokens=True
-        )
-
-        # Extract the model's predicted sentiment
-        generated_text = outputs[0]["generated_text"]
-        prediction = generated_text[len(prompt):].strip().lower()
-
-        # Map prediction to label (1 = positive, 0 = negative)
-        if "positive" in prediction:
-            predictions.append(1)
-        elif "negative" in prediction:
-            predictions.append(0)
-        else:
-            predictions.append(-1)  # Unknown/invalid prediction
-
-    # Calculate accuracy, ignoring invalid predictions
-    valid_predictions = [(pred, label) for pred, label in zip(predictions, true_labels) if pred != -1]
-    valid_preds, valid_labels = zip(*valid_predictions)
-
-    accuracy = accuracy_score(valid_labels, valid_preds)
-    print(f"Accuracy on test dataset: {accuracy * 100:.2f}%")
 
 def model_eval(test_data):
     """Evaluate the fine-tuned model on a small subset of the test dataset."""
@@ -225,6 +175,79 @@ def model_eval(test_data):
         print(f"Accuracy on test cases: {accuracy * 100:.2f}%")
     else:
         print("No valid predictions to evaluate.")
+
+def prune_lora_adapter(lora_model, sparsity=0.5):
+    """
+    Prunes LoRA adapter layers to the given sparsity level.
+    
+    Args:
+        lora_model: The model with LoRA adapters.
+        sparsity: The sparsity level (percentage of weights to prune).
+    """
+    for name, module in lora_model.named_modules():
+        if isinstance(module, nn.Linear):
+            prune.l1_unstructured(module, name="weight", amount=sparsity)
+            prune.remove(module, "weight")
+
+    return lora_model
+
+def knowledge_distillation(pruned_model, teacher_model, dataloader, optimizer, num_epochs=3):
+    loss_fn = nn.MSELoss()
+    pruned_model.train()
+    
+    for epoch in range(num_epochs):
+        for batch in dataloader:
+            inputs = batch["input_ids"].to(pruned_model.device)
+            with torch.no_grad():
+                teacher_outputs = teacher_model(inputs).logits
+            
+            student_outputs = pruned_model(inputs).logits
+            loss = loss_fn(student_outputs, teacher_outputs)
+            
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+    
+    return pruned_model
+
+def prune_process():
+    """Prune the fine-tuned model using LoRA."""
+    
+    BASE_MODEL = "google/gemma-2b-it"
+    ADAPTER_MODEL = "lora_adapter"
+
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.float16
+    )
+    base_model = AutoModelForCausalLM.from_pretrained(
+        BASE_MODEL,
+        quantization_config=bnb_config,
+        device_map=None,
+        low_cpu_mem_usage=True,
+    )
+    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
+    lora_model = PeftModel.from_pretrained(base_model, ADAPTER_MODEL, device_map="auto")
+
+    sparsity = 0.5
+    pruned_lora_model = prune_lora_adapter(lora_model, sparsity=sparsity)
+    # pruned_lora_model = knowledge_distillation(pruned_lora_model, lora_model, dataloader, optimizer, num_epochs=3)
+
+    PRUNED_ADAPTER_MODEL = "pruned_lora_adapter"
+    pruned_lora_model.save_pretrained(PRUNED_ADAPTER_MODEL)
+
+    base_model = AutoModelForCausalLM.from_pretrained(BASE_MODEL, device_map="auto", torch_dtype=torch.float16)
+    final_model = PeftModel.from_pretrained(base_model, PRUNED_ADAPTER_MODEL)
+    final_model.save_pretrained("gemma-2b-it-sst2-pruned")
+
+        
+    PRUNED_ADAPTER_MODEL = "pruned_lora_adapter"
+    pruned_lora_model.save_pretrained(PRUNED_ADAPTER_MODEL)
+
+    base_model = AutoModelForCausalLM.from_pretrained(BASE_MODEL, device_map="auto", torch_dtype=torch.float16)
+    final_model = PeftModel.from_pretrained(base_model, PRUNED_ADAPTER_MODEL)
+    final_model.save_pretrained("gemma-2b-it-sst2-pruned")
 
 
 

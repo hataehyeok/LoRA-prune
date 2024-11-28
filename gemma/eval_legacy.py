@@ -2,6 +2,58 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig, pipeline, TrainingArguments
 from sklearn.metrics import accuracy_score
 
+def erer_model_eval(test_data):
+    """Evaluate the fine-tuned model on the test dataset."""
+
+    BASE_MODEL = "google/gemma-2b-it"
+    FINETUNE_MODEL = "./gemma-2b-it-sst2"
+
+    finetune_model = AutoModelForCausalLM.from_pretrained(FINETUNE_MODEL, device_map={"": 0})
+    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
+
+    pipe_finetuned = pipeline("text-generation", model=finetune_model, tokenizer=tokenizer, max_new_tokens=64)
+
+    predictions = []
+    true_labels = []
+
+    for example in test_data:
+        sentence = example['sentence']
+        true_label = example['label']
+        true_labels.append(true_label)
+
+        # Create prompt for evaluation
+        prompt = f"<bos><start_of_turn>user\nThe sentiment of the following text:\n\n{sentence}<end_of_turn>\n<start_of_turn>model\n"
+
+        # Generate model output
+        outputs = pipe_finetuned(
+            prompt,
+            do_sample=True,
+            temperature=0.7,
+            top_k=50,
+            top_p=0.9,
+            add_special_tokens=True
+        )
+
+        # Extract the model's predicted sentiment
+        generated_text = outputs[0]["generated_text"]
+        prediction = generated_text[len(prompt):].strip().lower()
+
+        # Map prediction to label (1 = positive, 0 = negative)
+        if "positive" in prediction:
+            predictions.append(1)
+        elif "negative" in prediction:
+            predictions.append(0)
+        else:
+            predictions.append(-1)  # Unknown/invalid prediction
+
+    # Calculate accuracy, ignoring invalid predictions
+    valid_predictions = [(pred, label) for pred, label in zip(predictions, true_labels) if pred != -1]
+    valid_preds, valid_labels = zip(*valid_predictions)
+
+    accuracy = accuracy_score(valid_labels, valid_preds)
+    print(f"Accuracy on test dataset: {accuracy * 100:.2f}%")
+
+
 def model_eval_2(test_data):
     """Evaluate the fine-tuned model on the test dataset with batch processing."""
 
