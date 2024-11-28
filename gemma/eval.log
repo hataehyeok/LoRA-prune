@@ -1,9 +1,0 @@
-Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:  50%|█████     | 1/2 [00:04<00:04,  4.16s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:04<00:00,  1.86s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:04<00:00,  2.20s/it]
-Traceback (most recent call last):
-  File "/home/hth021002/lora-prune/gemma/gemma2b-glue.py", line 279, in <module>
-    model_eval_10case(test_data)
-  File "/home/hth021002/lora-prune/gemma/gemma2b-glue.py", line 241, in model_eval_10case
-    prompts = [
-  File "/home/hth021002/lora-prune/gemma/gemma2b-glue.py", line 242, in <listcomp>
-    f"<bos><start_of_turn>user\nThe sentiment of the following text:\n\n{example['sentence']}<end_of_turn>\n<start_of_turn>model\n"
-TypeError: string indices must be integers
