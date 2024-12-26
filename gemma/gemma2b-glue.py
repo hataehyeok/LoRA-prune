@@ -44,7 +44,6 @@ def compute_metrics(eval_preds):
         'f1': f1
     }
 
-
 def dataset_loading():
     """Load the GLUE SST-2 dataset."""
     dataset = load_dataset("glue", "sst2")
@@ -81,7 +80,7 @@ def fine_tuning(train_data, test_data):
     args = TrainingArguments(
         output_dir="outputs",
         num_train_epochs=1,
-        max_steps=100,
+        # max_steps=100,
         per_device_train_batch_size=8,
         gradient_accumulation_steps=2,
         warmup_steps=100,
@@ -98,12 +97,11 @@ def fine_tuning(train_data, test_data):
     trainer = SFTTrainer(
         model=model,
         train_dataset=train_data,
-        max_seq_length=128,
+        # max_seq_length=128,
         tokenizer=tokenizer,
         args=args,
         peft_config=lora_config,
         formatting_func=generate_prompt,
-        compute_metrics=compute_metrics,
     )
 
     trainer.train()
@@ -114,21 +112,8 @@ def fine_tuning(train_data, test_data):
     model = AutoModelForCausalLM.from_pretrained(BASE_MODEL, device_map='auto', torch_dtype=torch.float16)
     model = PeftModel.from_pretrained(model, ADAPTER_MODEL, device_map='auto', torch_dtype=torch.float16)
 
-    # model = model.merge_and_unload()
-    # model.save_pretrained('gemma-2b-it-sst2_test')
-
-    predictions = trainer.predict(test_data)
-    print(predictions.predictions.shape, predictions.label_ids.shape)
-
-    logits = predictions.predictions
-    y_pred = np.argmax(logits, axis=-1)
-    y_true = predictions.label_ids
-
-    # Classification Report
-    class_report = classification_report(y_true, y_pred)
-    print("Classification Report:")
-    print(class_report)
-
+    model = model.merge_and_unload()
+    model.save_pretrained('gemma-2b-it-sst2')
 
 def model_test_print(test_data):
     """Test the fine-tuned model."""
@@ -162,77 +147,49 @@ def model_test_print(test_data):
 
     print('\nResults of the model:')
     print(outputs[0]["generated_text"][len(prompt):])
-    
-def eval_model(test_data):
-    """Evaluate the fine-tuned model."""
+
+def model_eval(test_data):
+    """Evaluate the fine-tuned model on a small subset of the test dataset."""
+
     BASE_MODEL = "google/gemma-2b-it"
     FINETUNE_MODEL = "./gemma-2b-it-sst2"
 
+    # finetune_model = AutoModelForCausalLM.from_pretrained(FINETUNE_MODEL, device_map={"": 0})
     base_model = AutoModelForCausalLM.from_pretrained(BASE_MODEL, device_map={"": 0})
     tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
 
-    pipe = pipeline("text-classification", model=base_model, tokenizer=tokenizer)    # test_data = test_data.select(range(10))
-    # data = test_data
-    data = load_dataset("glue", "sst2")['test'].shuffle().select(range(10))
-    metric = evaluate.load("accuracy")
-    
-    task_evaluator = evaluator("text-generation")
-    results = task_evaluator.compute(
-        model_or_pipeline=pipe,
-        data=data,
-        metric=metric,
-        input_column="sentence",
-        label_column="label",
-        label_mapping={"negative": 0, "positive": 1}
-    )
-    print(results)
+    # Results of the fine-tuned model
+    pipe_finetuned = pipeline("text-generation", model=base_model, tokenizer=tokenizer, max_new_tokens=64)
+    prompts = [
+        f"<bos><start_of_turn>user\nThe sentiment of the following text:\n\n{example['sentence']}<end_of_turn>\n<start_of_turn>model\n"
+        for example in test_data
+    ]
 
-def fi_eval_model():
-    BASE_MODEL = "google/gemma-2b-it"
+    outputs = pipe_finetuned(prompts, do_sample=True, temperature=0.7, top_k=50, top_p=0.9, add_special_tokens=True)
 
-    # Load model and tokenizer for classification
-    model = AutoModelForSequenceClassification.from_pretrained(BASE_MODEL)
-    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
-
-    # Classification pipeline
-    pipe = pipeline("text-classification", model=model, tokenizer=tokenizer)
-
-    # Load dataset
-    data = load_dataset("glue", "sst2")['test']
-    print(data)
-    data = data.select(range(20))
-
-    input_column = "sentence"
-    label_column = "label"
-
-    # Load accuracy metric
-    metric = evaluate.load("accuracy")
-
-    # Evaluate
     predictions = []
-    references = []
+    for output, example in zip(outputs, test_data):
+        generated_text = output[0]["generated_text"]
+        prompt = f"<bos><start_of_turn>user\nThe sentiment of the following text:\n\n{example['sentence']}<end_of_turn>\n<start_of_turn>model\n"
+        prediction_text = generated_text[len(prompt):].strip().lower()
 
-    for example in data:
-        print(example)
-        print('\n')
+        if "positive" in prediction_text:
+            predictions.append(1)
+        elif "negative" in prediction_text:
+            predictions.append(0)
+        else:
+            predictions.append(-1)
 
-    for example in data:
-        # Get model prediction
-        prediction = pipe(example[input_column])[0]['label']
-        # Convert prediction from 'LABEL_0'/'LABEL_1' to 0/1
-        predicted_label = int(prediction.split('_')[-1])
-        predictions.append(predicted_label)
+    true_labels = [example['label'] for example in test_data]
 
-        # Append true label (ensure it's correctly accessed)
-        references.append(example[label_column])
+    valid_predictions = [(pred, label) for pred, label in zip(predictions, true_labels) if pred != -1]
+    if valid_predictions:
+        valid_preds, valid_labels = zip(*valid_predictions)
+        accuracy = accuracy_score(valid_labels, valid_preds)
+        print(f"Accuracy on test cases: {accuracy * 100:.2f}%")
+    else:
+        print("No valid predictions to evaluate.")
 
-    # Debugging: Print predictions and references
-    print('\n\nPredictions:', predictions)
-    print('References:', references, '\n\n')
-
-    # Compute metric
-    results = metric.compute(predictions=predictions, references=references)
-    print(results)
 
 def prune_lora_adapter(lora_model, sparsity=0.5):
     """
@@ -308,84 +265,8 @@ def prune_process():
     final_model.save_pretrained("gemma-2b-it-sst2-pruned")
 
 
-def sst2_dataset_view():
-    """View the SST-2 dataset."""
-    dataset = load_dataset("glue", "sst2")
-    print(dataset)
-
-    train_data = dataset['train']
-    valid_data = dataset['validation']
-    test_data = dataset['test']
-
-    print(train_data)
-    print(valid_data)
-    print(test_data)
-
-    train_data = train_data.select(range(10))
-    valid_data = valid_data.select(range(10))
-    test_data = test_data.select(range(10))
-
-    print('This is training data:')
-    for example in train_data:
-        print(example)
-    
-    print('This is valid data:')
-    for example in valid_data:
-        print(example)
-    
-    print('This is test data:')
-    for example in test_data:
-        print(example)
-
-
-def model_eval_lg(test_data):
-    """Evaluate the fine-tuned model on a small subset of the test dataset."""
-
-    BASE_MODEL = "google/gemma-2b-it"
-    FINETUNE_MODEL = "./gemma-2b-it-sst2"
-
-    test_data = test_data.select(range(30))
-
-    # finetune_model = AutoModelForCausalLM.from_pretrained(FINETUNE_MODEL, device_map={"": 0})
-    base_model = AutoModelForCausalLM.from_pretrained(BASE_MODEL, device_map={"": 0})
-    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
-
-    # Results of the fine-tuned model
-    pipe_finetuned = pipeline("text-generation", model=base_model, tokenizer=tokenizer, max_new_tokens=64)
-    prompts = [
-        f"<bos><start_of_turn>user\nThe sentiment of the following text:\n\n{example['sentence']}<end_of_turn>\n<start_of_turn>model\n"
-        for example in test_data
-    ]
-
-    outputs = pipe_finetuned(prompts, do_sample=True, temperature=0.7, top_k=50, top_p=0.9, add_special_tokens=True)
-
-    predictions = []
-    for output, example in zip(outputs, test_data):
-        generated_text = output[0]["generated_text"]
-        prompt = f"<bos><start_of_turn>user\nThe sentiment of the following text:\n\n{example['sentence']}<end_of_turn>\n<start_of_turn>model\n"
-        prediction_text = generated_text[len(prompt):].strip().lower()
-
-        if "positive" in prediction_text:
-            predictions.append(1)
-        elif "negative" in prediction_text:
-            predictions.append(0)
-        else:
-            predictions.append(-1)
-
-    true_labels = [example['label'] for example in test_data]
-
-    valid_predictions = [(pred, label) for pred, label in zip(predictions, true_labels) if pred != -1]
-    if valid_predictions:
-        valid_preds, valid_labels = zip(*valid_predictions)
-        accuracy = accuracy_score(valid_labels, valid_preds)
-        print(f"Accuracy on test cases: {accuracy * 100:.2f}%")
-    else:
-        print("No valid predictions to evaluate.")
-
 if __name__ == '__main__':
-    train_data, test_data = dataset_loading()
+    train_data, test_data = dataset_loading()  # validation dataset is used as a test dataset
     # fine_tuning(train_data, test_data)
     # model_test_print(test_data)
-    # fi_eval_model()
-    # sst2_dataset_view()
-    model_eval_lg(test_data)
+    model_eval(test_data)

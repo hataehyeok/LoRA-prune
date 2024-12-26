@@ -201,3 +201,29 @@ def model_eval_lg(test_data):
         print(f"Accuracy on test cases: {accuracy * 100:.2f}%")
     else:
         print("No valid predictions to evaluate.")
+
+
+
+# Use huggingface evaluate module but didn't work
+def eval_model(test_data):
+    """Evaluate the fine-tuned model."""
+    BASE_MODEL = "google/gemma-2b-it"
+    FINETUNE_MODEL = "./gemma-2b-it-sst2"
+
+    base_model = AutoModelForCausalLM.from_pretrained(BASE_MODEL, device_map={"": 0})
+    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
+
+    pipe = pipeline("text-generation", model=base_model, tokenizer=tokenizer, max_new_tokens = 64)
+    data = test_data
+    metric = evaluate.load("accuracy")
+    
+    task_evaluator = evaluator("text-generation")
+    results = task_evaluator.compute(
+        model_or_pipeline=pipe,
+        data=data,
+        metric=metric,
+        input_column="sentence",
+        label_column="label",
+        label_mapping={"negative": 0, "positive": 1}
+    )
+    print(results)
