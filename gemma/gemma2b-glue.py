@@ -130,27 +130,21 @@ def model_eval(test_data):
     BASE_MODEL = "google/gemma-2b-it"
     FINETUNE_MODEL = "./gemma-2b-it-sst2"
 
-    # Reshape test_data into a list of dictionaries
     test_data = test_data.select(range(100))
 
-    # Load the fine-tuned model and tokenizer
     finetune_model = AutoModelForCausalLM.from_pretrained(FINETUNE_MODEL, device_map={"": 0})
     tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
 
     pipe_finetuned = pipeline("text-generation", model=finetune_model, tokenizer=tokenizer, max_new_tokens=64)
-
-    # Prepare prompts for the test dataset
     prompts = [
         f"<bos><start_of_turn>user\nThe sentiment of the following text:\n\n{example['sentence']}<end_of_turn>\n<start_of_turn>model\n"
         for example in test_data
     ]
 
-    # Generate predictions in batches
     outputs = pipe_finetuned(prompts, do_sample=True, temperature=0.7, top_k=50, top_p=0.9, add_special_tokens=True)
 
-    # import pdb; pdb.set_trace()
+    import pdb; pdb.set_trace()
 
-    # Process outputs and map to labels
     predictions = []
     for output, example in zip(outputs, test_data):
         generated_text = output[0]["generated_text"]
@@ -162,12 +156,10 @@ def model_eval(test_data):
         elif "negative" in prediction_text:
             predictions.append(0)
         else:
-            predictions.append(-1)  # Unknown/invalid prediction
+            predictions.append(-1)
 
-    # Extract true labels
     true_labels = [example['label'] for example in test_data]
 
-    # Calculate accuracy, ignoring invalid predictions
     valid_predictions = [(pred, label) for pred, label in zip(predictions, true_labels) if pred != -1]
     if valid_predictions:
         valid_preds, valid_labels = zip(*valid_predictions)
@@ -253,5 +245,5 @@ def prune_process():
 
 if __name__ == '__main__':
     train_data, test_data = dataset_loading()
-    fine_tuning(train_data)
-    # model_eval(test_data)
+    # fine_tuning(train_data)
+    model_eval(test_data)
