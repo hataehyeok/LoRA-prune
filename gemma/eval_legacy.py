@@ -158,7 +158,7 @@ def model_eval_10case(test_data):
 
 
 
-def model_eval(test_data):
+def model_eval_lg(test_data):
     """Evaluate the fine-tuned model on a small subset of the test dataset."""
 
     BASE_MODEL = "google/gemma-2b-it"
