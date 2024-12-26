@@ -219,7 +219,7 @@ def knowledge_distillation(pruned_model, teacher_model, dataloader, optimizer, n
     
     return pruned_model
 
-def prune_process(test_data):
+def prune_and_knowledge_distillation(test_data):
     """Prune the fine-tuned model using LoRA."""
     set_seed(42)
     
@@ -246,7 +246,6 @@ def prune_process(test_data):
     
     tokenized_train = test_data.map(tokenize_function, batched=True)
     tokenized_train.set_format(type="torch", columns=["input_ids", "attention_mask", "label"])
-    dataloader = DataLoader(tokenized_train, batch_size=8, shuffle=True)
     
     print("Pruning the model...]\n\n")
 
@@ -259,9 +258,37 @@ def prune_process(test_data):
             prune.remove(module, "weight")
     pruned_lora_model = lora_model
 
-    # knowledge distillation
+    # knowledge distillation    
+    pruned_model = pruned_lora_model
+    teacher_model = lora_model
+    dataloader = DataLoader(tokenized_train, batch_size=2, shuffle=True)
     optimizer = torch.optim.AdamW(pruned_lora_model.parameters(), lr=5e-5)
-    pruned_lora_model = knowledge_distillation(pruned_lora_model, lora_model, dataloader, optimizer, num_epochs=3)
+    num_epochs = 3
+    
+    loss_fn = nn.MSELoss()
+    pruned_model.train()
+    
+    for epoch in range(num_epochs):
+        epoch_loss = 0
+        for batch in dataloader:
+            inputs = batch["input_ids"].to(pruned_model.device)
+            attention_mask = batch["attention_mask"].to(pruned_model.device)
+            
+            with torch.no_grad():
+                teacher_outputs = teacher_model(input_ids=inputs, attention_mask=attention_mask).logits
+            
+            student_outputs = pruned_model(input_ids=inputs, attention_mask=attention_mask).logits
+            loss = loss_fn(student_outputs, teacher_outputs)
+            
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            
+            epoch_loss += loss.item()
+        
+        print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {epoch_loss:.4f}")
+    
+    pruned_lora_model = pruned_model
 
     PRUNED_ADAPTER_MODEL = "pruned_lora_adapter"
     pruned_lora_model.save_pretrained(PRUNED_ADAPTER_MODEL)
@@ -276,5 +303,5 @@ if __name__ == '__main__':
     # fine_tuning(train_data)
     # model_test_print(valid_data)
     # model_eval(valid_data)
-    prune_process(test_data)
+    prune_and_knowledge_distillation(test_data)
 
