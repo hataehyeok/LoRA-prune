@@ -1,3 +1,6 @@
+
+sst2 is the emotional classification dataset to either positive or negative.
+
 DatasetDict({
     train: Dataset({
         features: ['sentence', 'label', 'idx'],

@@ -154,12 +154,12 @@ def model_eval(test_data):
     BASE_MODEL = "google/gemma-2b-it"
     FINETUNE_MODEL = "./gemma-2b-it-sst2"
 
-    # finetune_model = AutoModelForCausalLM.from_pretrained(FINETUNE_MODEL, device_map={"": 0})
-    base_model = AutoModelForCausalLM.from_pretrained(BASE_MODEL, device_map={"": 0})
+    finetune_model = AutoModelForCausalLM.from_pretrained(FINETUNE_MODEL, device_map={"": 0})
+    # base_model = AutoModelForCausalLM.from_pretrained(BASE_MODEL, device_map={"": 0})
     tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
 
     # Results of the fine-tuned model
-    pipe_finetuned = pipeline("text-generation", model=base_model, tokenizer=tokenizer, max_new_tokens=64)
+    pipe_finetuned = pipeline("text-generation", model=finetune_model, tokenizer=tokenizer, max_new_tokens=64)
     prompts = [
         f"<bos><start_of_turn>user\nThe sentiment of the following text:\n\n{example['sentence']}<end_of_turn>\n<start_of_turn>model\n"
         for example in test_data
@@ -269,4 +269,5 @@ if __name__ == '__main__':
     train_data, test_data = dataset_loading()  # validation dataset is used as a test dataset
     # fine_tuning(train_data, test_data)
     # model_test_print(test_data)
+    test_data = test_data.select(range(100))
     model_eval(test_data)
