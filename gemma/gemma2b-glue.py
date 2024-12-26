@@ -246,37 +246,46 @@ def prune_and_knowledge_distillation(test_data):
     
     tokenized_train = test_data.map(tokenize_function, batched=True)
     tokenized_train.set_format(type="torch", columns=["input_ids", "attention_mask", "label"])
+    dataloader = DataLoader(tokenized_train, batch_size=2, shuffle=True)
     
-    print("Pruning the model...]\n\n")
+    print("Pruning the model...\n")
 
-    # pruning the model
-    sparsity = 0.5
-
+    # Manual pruning
+    sparsity = 0.5  # Fraction of weights to prune
     for name, module in lora_model.named_modules():
         if isinstance(module, nn.Linear):
-            prune.l1_unstructured(module, name="weight", amount=sparsity)
-            prune.remove(module, "weight")
-    pruned_lora_model = lora_model
-
-    # knowledge distillation    
-    pruned_model = pruned_lora_model
-    teacher_model = lora_model
-    dataloader = DataLoader(tokenized_train, batch_size=2, shuffle=True)
-    optimizer = torch.optim.AdamW(pruned_lora_model.parameters(), lr=5e-5)
-    num_epochs = 3
+            # Get absolute weights
+            weight_tensor = module.weight.detach().to(torch.float32)
+            threshold = torch.quantile(weight_tensor.abs(), sparsity)  # Determine pruning threshold
+            
+            # Zero out weights below the threshold
+            mask = weight_tensor.abs() >= threshold
+            module.weight.data *= mask  # Apply the mask directly to the weights
     
+    pruned_lora_model = lora_model
+    
+    print("Knowledge distillation...\n")
+    
+    # Knowledge distillation setup
+    teacher_model = lora_model  # Teacher model is the unpruned LoRA model
+    optimizer = torch.optim.AdamW(pruned_lora_model.parameters(), lr=5e-5)
     loss_fn = nn.MSELoss()
+    pruned_model = pruned_lora_model
     pruned_model.train()
     
+    # Training the pruned model
+    num_epochs = 3
     for epoch in range(num_epochs):
         epoch_loss = 0
         for batch in dataloader:
             inputs = batch["input_ids"].to(pruned_model.device)
             attention_mask = batch["attention_mask"].to(pruned_model.device)
             
+            # Teacher outputs
             with torch.no_grad():
                 teacher_outputs = teacher_model(input_ids=inputs, attention_mask=attention_mask).logits
             
+            # Student outputs
             student_outputs = pruned_model(input_ids=inputs, attention_mask=attention_mask).logits
             loss = loss_fn(student_outputs, teacher_outputs)
             
@@ -290,6 +299,7 @@ def prune_and_knowledge_distillation(test_data):
     
     pruned_lora_model = pruned_model
 
+    # Save the pruned model
     PRUNED_ADAPTER_MODEL = "pruned_lora_adapter"
     pruned_lora_model.save_pretrained(PRUNED_ADAPTER_MODEL)
 
