@@ -152,3 +152,52 @@ def model_eval_10case(test_data):
         print(f"Accuracy on first 10 test cases: {accuracy * 100:.2f}%")
     else:
         print("No valid predictions to evaluate.")
+
+
+
+
+
+
+def model_eval(test_data):
+    """Evaluate the fine-tuned model on a small subset of the test dataset."""
+
+    BASE_MODEL = "google/gemma-2b-it"
+    FINETUNE_MODEL = "./gemma-2b-it-sst2"
+
+    test_data = test_data.select(range(500))
+
+    # finetune_model = AutoModelForCausalLM.from_pretrained(FINETUNE_MODEL, device_map={"": 0})
+    base_model = AutoModelForCausalLM.from_pretrained(BASE_MODEL, device_map={"": 0})
+    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
+
+    # Results of the fine-tuned model
+    pipe_finetuned = pipeline("text-generation", model=base_model, tokenizer=tokenizer, max_new_tokens=64)
+    prompts = [
+        f"<bos><start_of_turn>user\nThe sentiment of the following text:\n\n{example['sentence']}<end_of_turn>\n<start_of_turn>model\n"
+        for example in test_data
+    ]
+
+    outputs = pipe_finetuned(prompts, do_sample=True, temperature=0.7, top_k=50, top_p=0.9, add_special_tokens=True)
+
+    predictions = []
+    for output, example in zip(outputs, test_data):
+        generated_text = output[0]["generated_text"]
+        prompt = f"<bos><start_of_turn>user\nThe sentiment of the following text:\n\n{example['sentence']}<end_of_turn>\n<start_of_turn>model\n"
+        prediction_text = generated_text[len(prompt):].strip().lower()
+
+        if "positive" in prediction_text:
+            predictions.append(1)
+        elif "negative" in prediction_text:
+            predictions.append(0)
+        else:
+            predictions.append(-1)
+
+    true_labels = [example['label'] for example in test_data]
+
+    valid_predictions = [(pred, label) for pred, label in zip(predictions, true_labels) if pred != -1]
+    if valid_predictions:
+        valid_preds, valid_labels = zip(*valid_predictions)
+        accuracy = accuracy_score(valid_labels, valid_preds)
+        print(f"Accuracy on test cases: {accuracy * 100:.2f}%")
+    else:
+        print("No valid predictions to evaluate.")
