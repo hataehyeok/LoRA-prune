@@ -1,19 +1,0 @@
-Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:  50%|█████     | 1/2 [00:04<00:04,  4.14s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:04<00:00,  1.80s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:04<00:00,  2.15s/it]
-Results of the fine-tuned model:
-negativemodel
-negative
-model
-negative
- rval 
- prado 
- prado 
- rval 
- prado 
- rval 
- prado 
- rval 
- prado 
- rval 
- prado 
- rval 
- prado 

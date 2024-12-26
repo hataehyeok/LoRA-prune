@@ -91,7 +91,7 @@ vast.ai
 Experiment
 1. sst2
     - base model: Accuracy on test cases: 92.12%
-    - findtuned model: Accuracy on test cases: 96.00%
+    - findtuned model: Accuracy on test cases: 93.69%
 
 
 

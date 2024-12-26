@@ -10,7 +10,9 @@ from evaluate import evaluator
 import evaluate
 from torch.nn.utils import prune
 import torch.nn as nn
+from transformers.trainer_utils import set_seed
 import os
+from torch.utils.data import DataLoader
 
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
@@ -49,8 +51,9 @@ def dataset_loading():
     dataset = load_dataset("glue", "sst2")
     train_data = dataset['train']
     valid_data = dataset['validation']
+    test_data = dataset['test']
 
-    return train_data, valid_data
+    return train_data, valid_data, test_data
 
 def fine_tuning(train_data, test_data):
     """Fine-tune the model using LoRA configuration."""
@@ -190,43 +193,35 @@ def model_eval(test_data):
     else:
         print("No valid predictions to evaluate.")
 
-
-def prune_lora_adapter(lora_model, sparsity=0.5):
-    """
-    Prunes LoRA adapter layers to the given sparsity level.
-    
-    Args:
-        lora_model: The model with LoRA adapters.
-        sparsity: The sparsity level (percentage of weights to prune).
-    """
-    for name, module in lora_model.named_modules():
-        if isinstance(module, nn.Linear):
-            prune.l1_unstructured(module, name="weight", amount=sparsity)
-            prune.remove(module, "weight")
-
-    return lora_model
-
 def knowledge_distillation(pruned_model, teacher_model, dataloader, optimizer, num_epochs=3):
     loss_fn = nn.MSELoss()
     pruned_model.train()
     
     for epoch in range(num_epochs):
+        epoch_loss = 0
         for batch in dataloader:
             inputs = batch["input_ids"].to(pruned_model.device)
-            with torch.no_grad():
-                teacher_outputs = teacher_model(inputs).logits
+            attention_mask = batch["attention_mask"].to(pruned_model.device)
             
-            student_outputs = pruned_model(inputs).logits
+            with torch.no_grad():
+                teacher_outputs = teacher_model(input_ids=inputs, attention_mask=attention_mask).logits
+            
+            student_outputs = pruned_model(input_ids=inputs, attention_mask=attention_mask).logits
             loss = loss_fn(student_outputs, teacher_outputs)
             
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            
+            epoch_loss += loss.item()
+        
+        print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {epoch_loss:.4f}")
     
     return pruned_model
 
-def prune_process():
+def prune_process(test_data):
     """Prune the fine-tuned model using LoRA."""
+    set_seed(42)
     
     BASE_MODEL = "google/gemma-2b-it"
     ADAPTER_MODEL = "lora_adapter"
@@ -236,27 +231,38 @@ def prune_process():
         bnb_4bit_quant_type="nf4",
         bnb_4bit_compute_dtype=torch.float16
     )
+    
     base_model = AutoModelForCausalLM.from_pretrained(
         BASE_MODEL,
         quantization_config=bnb_config,
-        device_map=None,
+        device_map="auto",
         low_cpu_mem_usage=True,
     )
     tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
-    lora_model = PeftModel.from_pretrained(base_model, ADAPTER_MODEL, device_map="auto")
+    lora_model = PeftModel.from_pretrained(base_model, ADAPTER_MODEL, device_map="auto", torch_dtype=torch.float16)
+    
+    def tokenize_function(examples):
+        return tokenizer(examples["sentence"], truncation=True, padding="max_length", max_length=128)
+    
+    tokenized_train = test_data.map(tokenize_function, batched=True)
+    tokenized_train.set_format(type="torch", columns=["input_ids", "attention_mask", "label"])
+    dataloader = DataLoader(tokenized_train, batch_size=8, shuffle=True)
+    
+    print("Pruning the model...]\n\n")
 
+    # pruning the model
     sparsity = 0.5
-    pruned_lora_model = prune_lora_adapter(lora_model, sparsity=sparsity)
-    # pruned_lora_model = knowledge_distillation(pruned_lora_model, lora_model, dataloader, optimizer, num_epochs=3)
 
-    PRUNED_ADAPTER_MODEL = "pruned_lora_adapter"
-    pruned_lora_model.save_pretrained(PRUNED_ADAPTER_MODEL)
+    for name, module in lora_model.named_modules():
+        if isinstance(module, nn.Linear):
+            prune.l1_unstructured(module, name="weight", amount=sparsity)
+            prune.remove(module, "weight")
+    pruned_lora_model = lora_model
 
-    base_model = AutoModelForCausalLM.from_pretrained(BASE_MODEL, device_map="auto", torch_dtype=torch.float16)
-    final_model = PeftModel.from_pretrained(base_model, PRUNED_ADAPTER_MODEL)
-    final_model.save_pretrained("gemma-2b-it-sst2-pruned")
+    # knowledge distillation
+    optimizer = torch.optim.AdamW(pruned_lora_model.parameters(), lr=5e-5)
+    pruned_lora_model = knowledge_distillation(pruned_lora_model, lora_model, dataloader, optimizer, num_epochs=3)
 
-        
     PRUNED_ADAPTER_MODEL = "pruned_lora_adapter"
     pruned_lora_model.save_pretrained(PRUNED_ADAPTER_MODEL)
 
@@ -266,8 +272,9 @@ def prune_process():
 
 
 if __name__ == '__main__':
-    train_data, test_data = dataset_loading()  # validation dataset is used as a test dataset
-    # fine_tuning(train_data, test_data)
-    # model_test_print(test_data)
-    test_data = test_data.select(range(100))
-    model_eval(test_data)
+    train_data, valid_data, test_data = dataset_loading()  # validation dataset is used as a test dataset
+    # fine_tuning(train_data)
+    # model_test_print(valid_data)
+    # model_eval(valid_data)
+    prune_process(test_data)
+

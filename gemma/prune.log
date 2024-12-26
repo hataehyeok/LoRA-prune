@@ -1,0 +1,28 @@
+`config.hidden_act` is ignored, you should use `config.hidden_activation` instead.
+Gemma's activation function will be set to `gelu_pytorch_tanh`. Please, use
+`config.hidden_activation` if you want to override this behaviour.
+See https://github.com/huggingface/transformers/pull/29402 for more details.
+
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]
+Loading checkpoint shards:  50%|█████     | 1/2 [00:02<00:02,  2.37s/it]
+Loading checkpoint shards: 100%|██████████| 2/2 [00:02<00:00,  1.10s/it]
+Loading checkpoint shards: 100%|██████████| 2/2 [00:02<00:00,  1.29s/it]
+Pruning the model...]
+
+
+Traceback (most recent call last):
+  File "/home/hth021002/lora-prune/gemma/gemma2b-glue.py", line 279, in <module>
+    prune_process(test_data)
+  File "/home/hth021002/lora-prune/gemma/gemma2b-glue.py", line 258, in prune_process
+    prune.l1_unstructured(module, name="weight", amount=sparsity)
+  File "/home/hth021002/miniconda3/envs/test/lib/python3.10/site-packages/torch/nn/utils/prune.py", line 932, in l1_unstructured
+    L1Unstructured.apply(
+  File "/home/hth021002/miniconda3/envs/test/lib/python3.10/site-packages/torch/nn/utils/prune.py", line 555, in apply
+    return super().apply(
+  File "/home/hth021002/miniconda3/envs/test/lib/python3.10/site-packages/torch/nn/utils/prune.py", line 198, in apply
+    raise e
+  File "/home/hth021002/miniconda3/envs/test/lib/python3.10/site-packages/torch/nn/utils/prune.py", line 184, in apply
+    mask = method.compute_mask(importance_scores, default_mask=default_mask)
+  File "/home/hth021002/miniconda3/envs/test/lib/python3.10/site-packages/torch/nn/utils/prune.py", line 527, in compute_mask
+    topk = torch.topk(torch.abs(t).view(-1), k=nparams_toprune, largest=False)
+torch.cuda.OutOfMemoryError: CUDA out of memory. Tried to allocate 1.95 GiB. GPU 0 has a total capacity of 11.90 GiB of which 1.84 GiB is free. Including non-PyTorch memory, this process has 10.05 GiB memory in use. Of the allocated memory 9.85 GiB is allocated by PyTorch, and 38.61 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
