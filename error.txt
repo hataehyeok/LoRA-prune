@@ -80,18 +80,24 @@ ERROR
 - xp로 할 수 있다 -> 없다 -> 월화까지 결정하기
 - 6 or 8로 일단 해보고 -> 터질 수도 있음
 
-
-
-최소 24는 되어야 하고 -> 크레딧 구매하고
-지금 당장 결과를 뽑기 어려워보임
-vast.ai
-
-
-
 Experiment
 1. sst2
     - base model: Accuracy on test cases: 92.12%
     - findtuned model: Accuracy on test cases: 93.69%
+
+
+48GB
+400
+
+vast.ai
+
+
+Ada
+RTXA5000
+작은거는 일단 1장 짜리로 쭉 돌려보고 큰거는 4개 구매하고 DDP로 돌리기
+3090도 가성비 괜찮아서 많이 썼고 최근에는 4090 많이 쓰고있음
+
+
 
 
 
