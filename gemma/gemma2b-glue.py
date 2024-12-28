@@ -6,8 +6,6 @@ from peft import LoraConfig, PeftModel
 from trl import SFTTrainer
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from sklearn.metrics import classification_report, confusion_matrix
-from evaluate import evaluator
-import evaluate
 from torch.nn.utils import prune
 import torch.nn as nn
 from transformers.trainer_utils import set_seed
@@ -55,7 +53,7 @@ def dataset_loading():
 
     return train_data, valid_data, test_data
 
-def fine_tuning(train_data, test_data):
+def fine_tuning(train_data):
     """Fine-tune the model using LoRA configuration."""
     lora_config = LoraConfig(
         r=6,
@@ -83,7 +81,7 @@ def fine_tuning(train_data, test_data):
     args = TrainingArguments(
         output_dir="outputs",
         num_train_epochs=1,
-        # max_steps=100,
+        max_steps=100,
         per_device_train_batch_size=8,
         gradient_accumulation_steps=2,
         warmup_steps=100,
@@ -100,7 +98,7 @@ def fine_tuning(train_data, test_data):
     trainer = SFTTrainer(
         model=model,
         train_dataset=train_data,
-        # max_seq_length=128,
+        #max_seq_length=256,
         tokenizer=tokenizer,
         args=args,
         peft_config=lora_config,
@@ -117,6 +115,7 @@ def fine_tuning(train_data, test_data):
 
     model = model.merge_and_unload()
     model.save_pretrained('gemma-2b-it-sst2')
+
 
 def model_test_print(test_data):
     """Test the fine-tuned model."""
@@ -221,7 +220,6 @@ def knowledge_distillation(pruned_model, teacher_model, dataloader, optimizer, n
 
 def prune_and_knowledge_distillation(test_data):
     """Prune the fine-tuned model using LoRA."""
-    set_seed(42)
     
     BASE_MODEL = "google/gemma-2b-it"
     ADAPTER_MODEL = "lora_adapter"
@@ -238,6 +236,7 @@ def prune_and_knowledge_distillation(test_data):
         device_map="auto",
         low_cpu_mem_usage=True,
     )
+    
     tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
     lora_model = PeftModel.from_pretrained(base_model, ADAPTER_MODEL, device_map="auto", torch_dtype=torch.float16)
     
@@ -251,23 +250,21 @@ def prune_and_knowledge_distillation(test_data):
     print("Pruning the model...\n")
 
     # Manual pruning
-    sparsity = 0.5  # Fraction of weights to prune
+    sparsity = 0.5
     for name, module in lora_model.named_modules():
         if isinstance(module, nn.Linear):
-            # Get absolute weights
             weight_tensor = module.weight.detach().to(torch.float32)
-            threshold = torch.quantile(weight_tensor.abs(), sparsity)  # Determine pruning threshold
+            threshold = torch.quantile(weight_tensor.abs(), sparsity)
             
-            # Zero out weights below the threshold
             mask = weight_tensor.abs() >= threshold
-            module.weight.data *= mask  # Apply the mask directly to the weights
+            module.weight.data *= mask
     
     pruned_lora_model = lora_model
     
     print("Knowledge distillation...\n")
     
     # Knowledge distillation setup
-    teacher_model = lora_model  # Teacher model is the unpruned LoRA model
+    teacher_model = lora_model
     optimizer = torch.optim.AdamW(pruned_lora_model.parameters(), lr=5e-5)
     loss_fn = nn.MSELoss()
     pruned_model = pruned_lora_model

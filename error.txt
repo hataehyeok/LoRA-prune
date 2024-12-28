@@ -1,5 +1,6 @@
 
 COMMAND
+conda create --name lora-prune python=3.10.15
 
 
 python version -> above 3.9
@@ -25,6 +26,9 @@ peft
 
 trl
     pip install trl
+
+sklearn
+    conda install scikit-learn
 
 requests
 
@@ -79,6 +83,21 @@ ERROR
     - what?
     - ValueError: Evaluation module cache file doesn't exist. Please make sure that you call `add` or `add_batch` at least once before calling `compute`.
 
+8. pip
+    - ERROR: pip's dependency resolver does not currently take into account all the packages that are installed. This behaviour is the source of the following dependency conflicts.
+    - pip install --upgrade torch
+
+9. huggingface login
+    pip install huggingface_hub
+    huggingface-cli login
+
+10. TypeError: GemmaModel.forward() got an unexpected keyword argument 'num_items_in_batch'
+    - transformers version problem
+    - pip show transformers -> Name: transformers; Version: 4.46.3
+    So, upgrade the version and use it
+    - pip install --upgrade transformers
+    => Name: transformers; Version: 4.47.1
+
 
 
 - memory 더 큰 gpu에 로딩하고 -> 의미 있는 값을 뽑을 수 있으려나
@@ -101,9 +120,4 @@ Ada
 RTXA5000
 작은거는 일단 1장 짜리로 쭉 돌려보고 큰거는 4개 구매하고 DDP로 돌리기
 3090도 가성비 괜찮아서 많이 썼고 최근에는 4090 많이 쓰고있음
-
-
-
-
-
 
