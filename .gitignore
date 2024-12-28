@@ -1,13 +1,2 @@
 config.py
 ex.py
-output.log
-__pycache__/
-gemma-2b-it-sum-ko
-lora_adapter
-outputs
-sklearn-env
-gemma-2b-it-sst2
-gemma/eval.log
-gemma/glue.log
-gemma/train.log
-gemma/print.log
