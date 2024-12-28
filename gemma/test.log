@@ -1,41 +1,0 @@
-Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:  50%|█████     | 1/2 [00:04<00:04,  4.12s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:04<00:00,  1.83s/it]Loading checkpoint shards: 100%|██████████| 2/2 [00:04<00:00,  2.17s/it]
-`config.hidden_act` is ignored, you should use `config.hidden_activation` instead.
-Gemma's activation function will be set to `gelu_pytorch_tanh`. Please, use
-`config.hidden_activation` if you want to override this behaviour.
-See https://github.com/huggingface/transformers/pull/29402 for more details.
-Results of the fine-tuned model:
-negative
-model
-negative
- rval 
-model
-negative
- rval 
- tulum 
- rval 
- rval 
- rval 
- rval 
- rval 
- rval 
- rval 
- rval 
- rval 
- rval
-Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]
-Traceback (most recent call last):
-  File "/home/hth021002/lora-prune/gemma/gemma2b-glue.py", line 314, in <module>
-    model_test_print(test_data)
-  File "/home/hth021002/lora-prune/gemma/gemma2b-glue.py", line 133, in model_test_print
-    base_model = AutoModelForCausalLM.from_pretrained(BASE_MODEL, device_map={"": 0})
-  File "/home/hth021002/miniconda3/envs/test/lib/python3.10/site-packages/transformers/models/auto/auto_factory.py", line 564, in from_pretrained
-    return model_class.from_pretrained(
-  File "/home/hth021002/miniconda3/envs/test/lib/python3.10/site-packages/transformers/modeling_utils.py", line 4225, in from_pretrained
-    ) = cls._load_pretrained_model(
-  File "/home/hth021002/miniconda3/envs/test/lib/python3.10/site-packages/transformers/modeling_utils.py", line 4728, in _load_pretrained_model
-    new_error_msgs, offload_index, state_dict_index = _load_state_dict_into_meta_model(
-  File "/home/hth021002/miniconda3/envs/test/lib/python3.10/site-packages/transformers/modeling_utils.py", line 993, in _load_state_dict_into_meta_model
-    set_module_tensor_to_device(model, param_name, param_device, **set_module_kwargs)
-  File "/home/hth021002/miniconda3/envs/test/lib/python3.10/site-packages/accelerate/utils/modeling.py", line 329, in set_module_tensor_to_device
-    new_value = value.to(device)
-torch.cuda.OutOfMemoryError: CUDA out of memory. Tried to allocate 128.00 MiB. GPU 0 has a total capacity of 11.90 GiB of which 8.88 MiB is free. Including non-PyTorch memory, this process has 11.88 GiB memory in use. Of the allocated memory 11.71 GiB is allocated by PyTorch, and 9.55 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)

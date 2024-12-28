@@ -81,7 +81,7 @@ def fine_tuning(train_data):
     args = TrainingArguments(
         output_dir="outputs",
         num_train_epochs=1,
-        max_steps=100,
+        max_steps=30,
         per_device_train_batch_size=8,
         gradient_accumulation_steps=2,
         warmup_steps=100,
@@ -307,7 +307,7 @@ def prune_and_knowledge_distillation(test_data):
 
 if __name__ == '__main__':
     train_data, valid_data, test_data = dataset_loading()  # validation dataset is used as a test dataset
-    # fine_tuning(train_data)
+    #fine_tuning(train_data)
     # model_test_print(valid_data)
     # model_eval(valid_data)
     prune_and_knowledge_distillation(test_data)

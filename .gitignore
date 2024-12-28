@@ -1,2 +1,4 @@
-config.py
-ex.py
+gemma/gemma-2b-it-sst2
+gemma/lora_adapter
+gemma/outputs
+gemma/*.log
