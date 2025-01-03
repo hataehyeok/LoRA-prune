@@ -1,4 +1,7 @@
+import os
 import torch
+from torch.nn.utils import prune
+import torch.nn as nn
 import numpy as np
 from datasets import load_dataset
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig, pipeline, TrainingArguments, AutoModelForSequenceClassification
@@ -6,10 +9,7 @@ from peft import LoraConfig, PeftModel
 from trl import SFTTrainer
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from sklearn.metrics import classification_report, confusion_matrix
-from torch.nn.utils import prune
-import torch.nn as nn
 from transformers.trainer_utils import set_seed
-import os
 from torch.utils.data import DataLoader
 
 
@@ -116,7 +116,6 @@ def fine_tuning(train_data):
     model = model.merge_and_unload()
     model.save_pretrained('gemma-2b-it-sst2')
 
-
 def model_test_print(test_data):
     """Test the fine-tuned model."""
     BASE_MODEL = "google/gemma-2b-it"
@@ -194,6 +193,68 @@ def model_eval(test_data):
     else:
         print("No valid predictions to evaluate.")
 
+
+
+def structured_pruning(
+    lora_model, 
+    calibration_dataset,
+    sparsity=0.5,
+    pruning_axes=["width", "depth"],
+    activation_based=True
+):
+    """
+    Perform structured pruning on the model.
+        - structure pruning
+	    - MLP, ATT, EMB pruning
+        - activation-based importance estimation strategy
+        - all the axes (depth(layer), neuron, head, embedding channel) -> using small calibration dataset and only forward propagation passes
+        - calibraion dataset????
+        - width -> activation based examining??]
+	    - width -> MHA, MLP, layernorm
+        - width -> use calibration dataset
+        - depth -> perplexity, block importance
+    """
+    
+    # Forward pass to compute activations for importance metrics
+    activations = {}
+    lora_model.eval()  # Set model to eval mode for forward passes
+
+    # Prepare calibration data loader
+    with torch.no_grad():
+        for input_data in calibration_dataset:
+            output = lora_model(input_data)
+            for name, module in lora_model.named_modules():
+                if isinstance(module, (nn.Linear, nn.LayerNorm, nn.MultiheadAttention)):
+                    if name not in activations:
+                        activations[name] = []
+                    activations[name].append(module.weight.abs().cpu())
+
+    # Average activations for importance
+    importance_scores = {
+        name: torch.mean(torch.cat(values), dim=0)
+        for name, values in activations.items()
+    }
+
+    # Prune based on axes
+    for name, module in lora_model.named_modules():
+        if name in importance_scores:
+            scores = importance_scores[name]
+            if "width" in pruning_axes and isinstance(module, (nn.Linear, nn.LayerNorm)):
+                threshold = torch.quantile(scores, sparsity)
+                mask = scores >= threshold
+                module.weight.data *= mask
+
+            if "depth" in pruning_axes and isinstance(module, nn.ModuleList):
+                block_scores = [torch.mean(importance_scores.get(f"{name}.{i}", torch.tensor(0))) for i in range(len(module))]
+                threshold = torch.quantile(torch.tensor(block_scores), sparsity)
+                for i, score in enumerate(block_scores):
+                    if score < threshold:
+                        module[i] = nn.Identity()  # Replace unimportant blocks with no-op
+
+    return lora_model
+
+
+
 def knowledge_distillation(pruned_model, teacher_model, dataloader, optimizer, num_epochs=3):
     loss_fn = nn.MSELoss()
     pruned_model.train()
@@ -220,8 +281,8 @@ def knowledge_distillation(pruned_model, teacher_model, dataloader, optimizer, n
     
     return pruned_model
 
-def prune_and_knowledge_distillation(test_data):
-    """Prune the fine-tuned model using LoRA."""
+def prune_and_knowledge_distillation(valid_data, test_data):
+    """Prune the fine-tuned model and perform knowledge distillation."""
     
     BASE_MODEL = "google/gemma-2b-it"
     ADAPTER_MODEL = "lora_adapter"
@@ -245,27 +306,14 @@ def prune_and_knowledge_distillation(test_data):
     def tokenize_function(examples):
         return tokenizer(examples["sentence"], truncation=True, padding="max_length", max_length=128)
     
-    tokenized_train = test_data.map(tokenize_function, batched=True)
+    # dataloader setup from the validation dataset
+    tokenized_train = valid_data.map(tokenize_function, batched=True)
     tokenized_train.set_format(type="torch", columns=["input_ids", "attention_mask", "label"])
     dataloader = DataLoader(tokenized_train, batch_size=2, shuffle=True)
-    
-    print("\n\n-----------Start model pruning-----------\n")
 
     # Manual pruning
-    sparsity = 0.5
-    for name, module in lora_model.named_modules():
-        if isinstance(module, nn.Linear):
-            weight_tensor = module.weight.detach().to(torch.float32)
-            threshold = torch.quantile(weight_tensor.abs(), sparsity)
-            
-            mask = weight_tensor.abs() >= threshold
-            module.weight.data *= mask
-    
-    pruned_lora_model = lora_model
-    
-    print("\n\-----------Done model pruning-----------\n")
-
-    print("\n\-----------Start KD-----------\n")
+    print("\n\n\n------------------ model pruning ------------------\n\n\n")
+    pruned_lora_model = structured_pruning(lora_model, dataloader, sparsity=0.5, pruning_axes=["width", "depth"], activation_based=True)
     
     # Knowledge distillation setup
     teacher_model = lora_model
@@ -317,5 +365,4 @@ if __name__ == '__main__':
     # fine_tuning(train_data)
     # model_test_print(valid_data)
     # model_eval(valid_data)
-    prune_and_knowledge_distillation(train_data)
-
+    prune_and_knowledge_distillation(valid_data, test_data)
