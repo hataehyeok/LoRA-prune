@@ -1,7 +1,7 @@
-import os
+import random
 import torch
 import torch.nn as nn
-from torch.utils.data import DataLoader
+from torch.utils.data import Subset, DataLoader
 import torch.nn.functional as F
 import numpy as np
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig, pipeline, TrainingArguments, AutoModelForSequenceClassification
@@ -10,10 +10,68 @@ from trl import SFTTrainer
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from sklearn.metrics import classification_report, confusion_matrix
 from transformers.trainer_utils import set_seed
+from torch.optim import Adam
+from torch.optim.lr_scheduler import CosineAnnealingLR
 
-# calibration_dataset
 
-def compute_width_importance_scores(model, data_loader, sparsity=0.5):
+# def setup_optimizer_and_scheduler(model, learning_rate=2e-4, min_lr=4.5e-7, total_epochs=10):
+#     """
+#     Setup optimizer and cosine LR scheduler for the model.
+    
+#     Args:
+#         model (nn.Module): The model to optimize.
+#         learning_rate (float): Initial learning rate.
+#         min_lr (float): Minimum learning rate for cosine decay.
+#         total_epochs (int): Total number of epochs for the scheduler.
+    
+#     Returns:
+#         optimizer: The Adam optimizer.
+#         scheduler: The cosine LR scheduler.
+#     """
+#     # Setup optimizer
+#     optimizer = Adam(model.parameters(), lr=learning_rate)
+    
+#     # Setup cosine LR scheduler
+#     scheduler = CosineAnnealingLR(optimizer, T_max=total_epochs, eta_min=min_lr)
+    
+#     return optimizer, scheduler
+
+# # Assume train_data, valid_data, test_data = dataset_loading()
+# calibration_loader = create_calibration_dataset(train_data, num_samples=1024, batch_size=32)
+
+# # Assume `model` is your neural network model
+# optimizer, scheduler = setup_optimizer_and_scheduler(
+#     model, learning_rate=2e-4, min_lr=4.5e-7, total_epochs=10
+# )
+
+# # Iterate over calibration data
+# for epoch in range(10):
+#     for batch in calibration_loader:
+#         # Forward pass, compute loss, backward pass, etc.
+#         pass
+#     scheduler.step()  # Adjust learning rate after each epoch
+
+
+
+def create_calibration_dataset(train_data, tokenizer, num_samples=1024, batch_size=32):
+    """
+    Create a calibration dataset from the training data.
+    """
+
+    def tokenize_function(examples):
+        return tokenizer(examples["sentence"], truncation=True, padding="max_length", max_length=128)
+    
+    tokenized_train = train_data.map(tokenize_function, batched=True)
+    tokenized_train.set_format(type="torch", columns=["input_ids", "attention_mask", "label"])
+
+    random.seed(42)
+    indices = random.sample(range(len(tokenized_train)), num_samples)
+    calibration_subset = Subset(tokenized_train, indices)
+    calibration_loader = DataLoader(calibration_subset, batch_size=batch_size, shuffle=False)
+    
+    return calibration_loader
+
+def compute_width_importance_scores(model, data_loader):
     """
     Compute importance scores for heads, neurons, and embedding channels.
     """
@@ -22,27 +80,35 @@ def compute_width_importance_scores(model, data_loader, sparsity=0.5):
 
     with torch.no_grad():
         for batch in data_loader:
+            input_ids = batch["input_ids"].to(model.device)
+            attention_mask = batch["attention_mask"].to(model.device)
+
             for name, module in model.named_modules():
-                if isinstance(module, nn.MultiheadAttention):
-                    # Compute importance for heads
-                    query, key, value = module.q_proj, module.k_proj, module.v_proj
-                    attn_output = torch.bmm(query(batch), key(batch).transpose(1, 2)) @ value(batch)
-                    head_importance = attn_output.norm(dim=(0, 1))  # Aggregating across batch, seq
-                    importance_scores["heads"][name] = head_importance
+                if isinstance(module, nn.MultiheadAttention):                    
+                    query, key, value = module.q_proj(input_ids), module.k_proj(input_ids), module.v_proj(input_ids)
+                    attn_output = torch.bmm(query, key.transpose(1, 2)) @ value
+
+                    attn_abs = attn_output.abs().norm(p=2, dim=-1)  # L2 norm of |Attn|
+                    head_importance = attn_abs.sum(dim=(0, 1))  # Sum over batch (B) and seq (S)
+                    
+                    if name not in importance_scores["heads"]:
+                        importance_scores["heads"][name] = torch.zeros(head_importance.size(), device=head_importance.device)
+                    importance_scores["heads"][name] += head_importance
 
                 elif isinstance(module, nn.Linear):
-                    # Compute importance for neurons
-                    weight = module.weight
-                    neuron_importance = weight.norm(dim=1)  # L2 norm across weights of each neuron
-                    importance_scores["neurons"][name] = neuron_importance
+                    output = module(input_ids)
+                    neuron_sum = output.sum(dim=(0, 1))  # Sum over batch (B) and seq (S)
+                    if name not in importance_scores["neurons"]:
+                        importance_scores["neurons"][name] = torch.zeros(neuron_sum.size(), device=neuron_sum.device)
+                    importance_scores["neurons"][name] += neuron_sum
 
                 elif isinstance(module, nn.LayerNorm):
-                    # Compute importance for embedding channels
-                    ln_output = module(batch)
-                    embedding_importance = ln_output.norm(dim=0)  # L2 norm across batch, seq
-                    importance_scores["embeddings"][name] = embedding_importance
+                    ln_output = module(input_ids)
+                    embedding_sum = ln_output.sum(dim=(0, 1))  # Sum over batch (B) and seq (S)
+                    if name not in importance_scores["embeddings"]:
+                        importance_scores["embeddings"][name] = torch.zeros(embedding_sum.size(), device=embedding_sum.device)
+                    importance_scores["embeddings"][name] += embedding_sum
 
-    # Aggregate scores across layers
     for key in importance_scores.keys():
         for layer_name, scores in importance_scores[key].items():
             importance_scores[key][layer_name] = scores.mean().item()  # Example aggregation
@@ -95,21 +161,18 @@ def structured_pruning(
     calibration_dataset,
     sparsity={"width": 0.5, "depth": 0.5},
     pruning_axes=["width", "depth"],
-    use_bi_for_depth=False
+    use_bi_for_depth=True
 ):
     """
     Perform structured pruning on the model.
         - Prunes MLP, ATT, and EMB layers
-        - Uses activation-based importance estimation strategy
+        - Uses *activation-based importance estimation strategy*
         - Handles width (head, neuron, embedding channel) and depth (layer/block) pruning
         - Supports Perplexity (PPL) and Block Importance (BI) for depth pruning
     """
 
-    # Compute width importance scores if width pruning is selected
     if "width" in pruning_axes:
-        importance_scores = compute_width_importance_scores(
-            lora_model, calibration_dataset, sparsity=sparsity["width"]
-        )
+        importance_scores = compute_width_importance_scores(lora_model, calibration_dataset)
 
         # Prune heads, neurons, and embedding channels based on scores
         for axis, scores in importance_scores.items():
@@ -130,7 +193,6 @@ def structured_pruning(
                     module = dict(lora_model.named_modules())[name]
                     module.weight.data *= mask
 
-    # Compute depth importance scores if depth pruning is selected
     if "depth" in pruning_axes:
         if use_bi_for_depth:
             # Use Block Importance (BI)
@@ -163,14 +225,6 @@ def structured_pruning(
 
 
 
-
-
-
-
-
-
-
-
 def knowledge_distillation(pruned_model, teacher_model, dataloader, optimizer, num_epochs=3):
     loss_fn = nn.MSELoss()
     pruned_model.train()
@@ -197,7 +251,7 @@ def knowledge_distillation(pruned_model, teacher_model, dataloader, optimizer, n
     
     return pruned_model
 
-def prune_and_knowledge_distillation(valid_data, test_data):
+def prune_and_knowledge_distillation(train_data, valid_data, test_data):
     """Prune the fine-tuned model and perform knowledge distillation."""
     
     BASE_MODEL = "google/gemma-2b-it"
@@ -218,27 +272,19 @@ def prune_and_knowledge_distillation(valid_data, test_data):
     
     tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
     lora_model = PeftModel.from_pretrained(base_model, ADAPTER_MODEL, device_map="auto", torch_dtype=torch.float16)
-    
-    def tokenize_function(examples):
-        return tokenizer(examples["sentence"], truncation=True, padding="max_length", max_length=128)
-    
-    # dataloader setup from the validation dataset
-    tokenized_train = valid_data.map(tokenize_function, batched=True)
-    tokenized_train.set_format(type="torch", columns=["input_ids", "attention_mask", "label"])
-    dataloader = DataLoader(tokenized_train, batch_size=2, shuffle=True)
+    calibration_dataset = create_calibration_dataset(train_data, tokenizer, num_samples=1024, batch_size=32)
 
-    # Manual pruning
+    # Structured pruning
     print("\n\n\n------------------ model pruning ------------------\n\n\n")
     sparsity_config = {"width": 0.5, "depth": 0.3}
     pruned_model = structured_pruning(
         lora_model,
-        dataloader,
+        calibration_dataset,
         sparsity=sparsity_config,
         pruning_axes=["width", "depth"],
-        use_bi_for_depth=True  # Use Block Importance for depth pruning
+        use_bi_for_depth=True
     )
 
-    
     # Knowledge distillation setup
     teacher_model = lora_model
     optimizer = torch.optim.AdamW(pruned_lora_model.parameters(), lr=5e-5)
