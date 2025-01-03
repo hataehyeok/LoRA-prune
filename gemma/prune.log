@@ -1,0 +1,55 @@
+`config.hidden_act` is ignored, you should use `config.hidden_activation` instead.
+Gemma's activation function will be set to `gelu_pytorch_tanh`. Please, use
+`config.hidden_activation` if you want to override this behaviour.
+See https://github.com/huggingface/transformers/pull/29402 for more details.
+
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]
+Loading checkpoint shards:  50%|█████     | 1/2 [00:08<00:08,  8.55s/it]
+Loading checkpoint shards: 100%|██████████| 2/2 [00:08<00:00,  3.75s/it]
+Loading checkpoint shards: 100%|██████████| 2/2 [00:08<00:00,  4.47s/it]
+
+Map:   0%|          | 0/67349 [00:00<?, ? examples/s]
+Map:   3%|▎         | 2000/67349 [00:00<00:04, 15852.54 examples/s]
+Map:   6%|▌         | 4000/67349 [00:00<00:03, 17149.64 examples/s]
+Map:   9%|▉         | 6000/67349 [00:00<00:03, 17394.69 examples/s]
+Map:  12%|█▏        | 8000/67349 [00:00<00:03, 17627.38 examples/s]
+Map:  15%|█▍        | 10000/67349 [00:00<00:03, 17633.05 examples/s]
+Map:  18%|█▊        | 12000/67349 [00:00<00:03, 17672.20 examples/s]
+Map:  21%|██        | 14000/67349 [00:00<00:03, 17772.45 examples/s]
+Map:  24%|██▍       | 16000/67349 [00:00<00:02, 17655.33 examples/s]
+Map:  27%|██▋       | 18000/67349 [00:01<00:02, 17768.99 examples/s]
+Map:  30%|██▉       | 20000/67349 [00:01<00:02, 17836.50 examples/s]
+Map:  33%|███▎      | 22000/67349 [00:01<00:02, 17694.24 examples/s]
+Map:  36%|███▌      | 24000/67349 [00:01<00:02, 17659.08 examples/s]
+Map:  39%|███▊      | 26000/67349 [00:01<00:02, 17679.60 examples/s]
+Map:  42%|████▏     | 28000/67349 [00:01<00:02, 17754.49 examples/s]
+Map:  45%|████▍     | 30000/67349 [00:01<00:02, 17796.47 examples/s]
+Map:  48%|████▊     | 32000/67349 [00:01<00:01, 17771.87 examples/s]
+Map:  50%|█████     | 34000/67349 [00:01<00:01, 17768.39 examples/s]
+Map:  53%|█████▎    | 36000/67349 [00:02<00:01, 17806.20 examples/s]
+Map:  56%|█████▋    | 38000/67349 [00:02<00:01, 17861.73 examples/s]
+Map:  59%|█████▉    | 40000/67349 [00:02<00:02, 11653.72 examples/s]
+Map:  62%|██████▏   | 42000/67349 [00:02<00:01, 12991.48 examples/s]
+Map:  65%|██████▌   | 44000/67349 [00:02<00:01, 14151.19 examples/s]
+Map:  68%|██████▊   | 46000/67349 [00:02<00:01, 15095.90 examples/s]
+Map:  71%|███████▏  | 48000/67349 [00:02<00:01, 15805.20 examples/s]
+Map:  74%|███████▍  | 50000/67349 [00:03<00:01, 16389.47 examples/s]
+Map:  77%|███████▋  | 52000/67349 [00:03<00:00, 16869.45 examples/s]
+Map:  82%|████████▏ | 55000/67349 [00:03<00:00, 17582.84 examples/s]
+Map:  85%|████████▍ | 57000/67349 [00:03<00:00, 17859.68 examples/s]
+Map:  88%|████████▊ | 59000/67349 [00:03<00:00, 18045.94 examples/s]
+Map:  91%|█████████ | 61000/67349 [00:03<00:00, 17675.16 examples/s]
+Map:  94%|█████████▎| 63000/67349 [00:03<00:00, 17577.23 examples/s]
+Map:  97%|█████████▋| 65000/67349 [00:03<00:00, 17568.49 examples/s]
+Map:  99%|█████████▉| 67000/67349 [00:03<00:00, 17608.83 examples/s]
+Map: 100%|██████████| 67349/67349 [00:03<00:00, 16869.43 examples/s]
+
+
+-----------Start model pruning-----------
+
+Traceback (most recent call last):
+  File "/root/lora-prune/gemma/gemma2b-glue.py", line 320, in <module>
+    prune_and_knowledge_distillation(train_data)
+  File "/root/lora-prune/gemma/gemma2b-glue.py", line 259, in prune_and_knowledge_distillation
+    threshold = torch.quantile(weight_tensor.abs(), sparsity)
+RuntimeError: quantile() input tensor is too large

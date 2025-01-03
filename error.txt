@@ -93,6 +93,7 @@ ERROR
 
 10. TypeError: GemmaModel.forward() got an unexpected keyword argument 'num_items_in_batch'
     - transformers version problem
+    - low version -> pip install transformers==4.45.2 sentence-transformers==3.1.1
     - pip show transformers -> Name: transformers; Version: 4.46.3
     So, upgrade the version and use it
     - pip install --upgrade transformers
@@ -104,20 +105,43 @@ ERROR
 - xp로 할 수 있다 -> 없다 -> 월화까지 결정하기
 - 6 or 8로 일단 해보고 -> 터질 수도 있음
 
-Experiment
+
+
+Fine-tuning results
 1. sst2
     - base model: Accuracy on test cases: 92.12%
     - findtuned model: Accuracy on test cases: 93.69%
 
 
+
 48GB
 400
-
-vast.ai
-
-
 Ada
 RTXA5000
 작은거는 일단 1장 짜리로 쭉 돌려보고 큰거는 4개 구매하고 DDP로 돌리기
 3090도 가성비 괜찮아서 많이 썼고 최근에는 4090 많이 쓰고있음
+
+
+
+
+COMMAND
+    python gemma2b-glue.py > ft.log 2>&1 &
+    du -h / --max-depth=1 | sort -hr | head -10
+    df -h
+
+
+
+Experiment
+
+
+
+
+1. pruning
+    - structure pruning
+    - MLP, ATT, EMB pruning
+
+
+TODO
+    - model size estimate, lora size estimate => total from x -> y
+    - 
 

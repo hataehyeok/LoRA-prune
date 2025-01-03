@@ -1,0 +1,7 @@
+
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]
+Loading checkpoint shards:  50%|█████     | 1/2 [00:12<00:12, 12.73s/it]
+Loading checkpoint shards: 100%|██████████| 2/2 [00:13<00:00,  5.43s/it]
+Loading checkpoint shards: 100%|██████████| 2/2 [00:13<00:00,  6.53s/it]
+Device set to use cuda:0
+Accuracy on test cases: 100.00%

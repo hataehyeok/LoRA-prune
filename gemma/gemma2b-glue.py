@@ -81,7 +81,7 @@ def fine_tuning(train_data):
     args = TrainingArguments(
         output_dir="outputs",
         num_train_epochs=1,
-        max_steps=30,
+        max_steps=200,
         per_device_train_batch_size=8,
         gradient_accumulation_steps=2,
         warmup_steps=100,
@@ -155,6 +155,8 @@ def model_eval(test_data):
 
     BASE_MODEL = "google/gemma-2b-it"
     FINETUNE_MODEL = "./gemma-2b-it-sst2"
+
+    test_data = test_data.select(range(20))
 
     finetune_model = AutoModelForCausalLM.from_pretrained(FINETUNE_MODEL, device_map={"": 0})
     # base_model = AutoModelForCausalLM.from_pretrained(BASE_MODEL, device_map={"": 0})
@@ -247,7 +249,7 @@ def prune_and_knowledge_distillation(test_data):
     tokenized_train.set_format(type="torch", columns=["input_ids", "attention_mask", "label"])
     dataloader = DataLoader(tokenized_train, batch_size=2, shuffle=True)
     
-    print("Pruning the model...\n")
+    print("\n\n-----------Start model pruning-----------\n")
 
     # Manual pruning
     sparsity = 0.5
@@ -261,7 +263,9 @@ def prune_and_knowledge_distillation(test_data):
     
     pruned_lora_model = lora_model
     
-    print("Knowledge distillation...\n")
+    print("\n\-----------Done model pruning-----------\n")
+
+    print("\n\-----------Start KD-----------\n")
     
     # Knowledge distillation setup
     teacher_model = lora_model
@@ -296,6 +300,9 @@ def prune_and_knowledge_distillation(test_data):
     
     pruned_lora_model = pruned_model
 
+    print("\n\-----------Done KD-----------\n")
+
+
     # Save the pruned model
     PRUNED_ADAPTER_MODEL = "pruned_lora_adapter"
     pruned_lora_model.save_pretrained(PRUNED_ADAPTER_MODEL)
@@ -306,9 +313,9 @@ def prune_and_knowledge_distillation(test_data):
 
 
 if __name__ == '__main__':
-    train_data, valid_data, test_data = dataset_loading()  # validation dataset is used as a test dataset
-    #fine_tuning(train_data)
+    train_data, valid_data, test_data = dataset_loading()
+    # fine_tuning(train_data)
     # model_test_print(valid_data)
     # model_eval(valid_data)
-    prune_and_knowledge_distillation(test_data)
+    prune_and_knowledge_distillation(train_data)
 

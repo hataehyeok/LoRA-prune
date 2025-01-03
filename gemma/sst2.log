@@ -1,0 +1,59 @@
+DatasetDict({
+    train: Dataset({
+        features: ['sentence', 'label', 'idx'],
+        num_rows: 67349
+    })
+    validation: Dataset({
+        features: ['sentence', 'label', 'idx'],
+        num_rows: 872
+    })
+    test: Dataset({
+        features: ['sentence', 'label', 'idx'],
+        num_rows: 1821
+    })
+})
+Dataset({
+    features: ['sentence', 'label', 'idx'],
+    num_rows: 67349
+})
+Dataset({
+    features: ['sentence', 'label', 'idx'],
+    num_rows: 872
+})
+Dataset({
+    features: ['sentence', 'label', 'idx'],
+    num_rows: 1821
+})
+This is training data:
+{'sentence': 'hide new secretions from the parental units ', 'label': 0, 'idx': 0}
+{'sentence': 'contains no wit , only labored gags ', 'label': 0, 'idx': 1}
+{'sentence': 'that loves its characters and communicates something rather beautiful about human nature ', 'label': 1, 'idx': 2}
+{'sentence': 'remains utterly satisfied to remain the same throughout ', 'label': 0, 'idx': 3}
+{'sentence': 'on the worst revenge-of-the-nerds clichés the filmmakers could dredge up ', 'label': 0, 'idx': 4}
+{'sentence': "that 's far too tragic to merit such superficial treatment ", 'label': 0, 'idx': 5}
+{'sentence': 'demonstrates that the director of such hollywood blockbusters as patriot games can still turn out a small , personal film with an emotional wallop . ', 'label': 1, 'idx': 6}
+{'sentence': 'of saucy ', 'label': 1, 'idx': 7}
+{'sentence': "a depressed fifteen-year-old 's suicidal poetry ", 'label': 0, 'idx': 8}
+{'sentence': "are more deeply thought through than in most ` right-thinking ' films ", 'label': 1, 'idx': 9}
+This is valid data:
+{'sentence': "it 's a charming and often affecting journey . ", 'label': 1, 'idx': 0}
+{'sentence': 'unflinchingly bleak and desperate ', 'label': 0, 'idx': 1}
+{'sentence': 'allows us to hope that nolan is poised to embark a major career as a commercial yet inventive filmmaker . ', 'label': 1, 'idx': 2}
+{'sentence': "the acting , costumes , music , cinematography and sound are all astounding given the production 's austere locales . ", 'label': 1, 'idx': 3}
+{'sentence': "it 's slow -- very , very slow . ", 'label': 0, 'idx': 4}
+{'sentence': 'although laced with humor and a few fanciful touches , the film is a refreshingly serious look at young women . ', 'label': 1, 'idx': 5}
+{'sentence': 'a sometimes tedious film . ', 'label': 0, 'idx': 6}
+{'sentence': "or doing last year 's taxes with your ex-wife . ", 'label': 0, 'idx': 7}
+{'sentence': "you do n't have to know about music to appreciate the film 's easygoing blend of comedy and romance . ", 'label': 1, 'idx': 8}
+{'sentence': "in exactly 89 minutes , most of which passed as slowly as if i 'd been sitting naked on an igloo , formula 51 sank from quirky to jerky to utter turkey . ", 'label': 0, 'idx': 9}
+This is test data:
+{'sentence': 'uneasy mishmash of styles and genres .', 'label': -1, 'idx': 0}
+{'sentence': "this film 's relationship to actual tension is the same as what christmas-tree flocking in a spray can is to actual snow : a poor -- if durable -- imitation .", 'label': -1, 'idx': 1}
+{'sentence': 'by the end of no such thing the audience , like beatrice , has a watchful affection for the monster .', 'label': -1, 'idx': 2}
+{'sentence': 'director rob marshall went out gunning to make a great one .', 'label': -1, 'idx': 3}
+{'sentence': 'lathan and diggs have considerable personal charm , and their screen rapport makes the old story seem new .', 'label': -1, 'idx': 4}
+{'sentence': 'a well-made and often lovely depiction of the mysteries of friendship .', 'label': -1, 'idx': 5}
+{'sentence': "none of this violates the letter of behan 's book , but missing is its spirit , its ribald , full-throated humor .", 'label': -1, 'idx': 6}
+{'sentence': "although it bangs a very cliched drum at times , this crowd-pleaser 's fresh dialogue , energetic music , and good-natured spunk are often infectious .", 'label': -1, 'idx': 7}
+{'sentence': 'it is not a mass-market entertainment but an uncompromising attempt by one artist to think about another .', 'label': -1, 'idx': 8}
+{'sentence': 'this is junk food cinema at its greasiest .', 'label': -1, 'idx': 9}
