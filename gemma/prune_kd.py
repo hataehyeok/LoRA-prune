@@ -174,28 +174,22 @@ def structured_pruning(
     if "width" in pruning_axes:
         importance_scores = compute_width_importance_scores(lora_model, calibration_dataset)
 
-        # Prune heads, neurons, and embedding channels based on scores
         for axis, scores in importance_scores.items():
             for name, score in scores.items():
-                # Prune based on sparsity threshold
                 threshold = torch.quantile(torch.tensor(score), sparsity["width"])
                 mask = torch.tensor(score) >= threshold
                 if axis == "heads":
-                    # Prune heads in MultiheadAttention
                     module = dict(lora_model.named_modules())[name]
                     module.prune_heads(mask)
                 elif axis == "neurons":
-                    # Prune neurons in Linear layers
                     module = dict(lora_model.named_modules())[name]
                     module.weight.data *= mask.unsqueeze(1)
                 elif axis == "embeddings":
-                    # Prune embedding channels in LayerNorm
                     module = dict(lora_model.named_modules())[name]
                     module.weight.data *= mask
 
     if "depth" in pruning_axes:
         if use_bi_for_depth:
-            # Use Block Importance (BI)
             bi_scores = compute_block_importance(lora_model, calibration_dataset)
             for name, score in bi_scores.items():
                 if score < sparsity["depth"]:
