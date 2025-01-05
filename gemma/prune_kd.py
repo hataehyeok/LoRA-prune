@@ -107,8 +107,8 @@ def compute_width_importance_scores(model, data_loader):
                 if isinstance(module, nn.MultiheadAttention):                    
                     query, key, value = module.q_proj(input_ids), module.k_proj(input_ids), module.v_proj(input_ids)
                     attn_output = torch.bmm(query, key.transpose(1, 2)) @ value
-                    attn_over_seq = attn_output.norm(p=2, dim=1)
-                    attn_over_batch = attn_over_seq.mean(dim=0)
+                    attn_over_seq = attn_output.mean(dim=1)
+                    attn_over_batch = attn_over_seq.norm(p=2, dim=0)
                     head_importance = attn_over_batch.sum(dim=0)
 
                     if print_once:
@@ -132,18 +132,24 @@ def compute_width_importance_scores(model, data_loader):
                     importance_scores["heads"][name] += head_importance
 
                 elif isinstance(module, nn.Linear):
-                    output = module(input_ids)
-                    neuron_sum = output.sum(dim=(0, 1))
+                    neuron_output = module(input_ids)
+                    neuron_over_seq = neuron_output.mean(dim=1)
+                    neuron_over_batch = neuron_over_seq.norm(p=2, dim=0)
+                    neuron_importance = neuron_over_batch.sum(dim=0)
+                    
                     if name not in importance_scores["neurons"]:
-                        importance_scores["neurons"][name] = torch.zeros(neuron_sum.size(), device=neuron_sum.device)
-                    importance_scores["neurons"][name] += neuron_sum
+                        importance_scores["neurons"][name] = torch.zeros(neuron_importance.size(), device=neuron_importance.device)
+                    importance_scores["neurons"][name] += neuron_importance
 
                 elif isinstance(module, nn.LayerNorm):
-                    ln_output = module(input_ids)
-                    embedding_sum = ln_output.sum(dim=(0, 1))
+                    emb_output = module(input_ids)
+                    emb_over_seq = emb_output.mean(dim=1)
+                    emb_over_batch = emb_over_seq.norm(p=2, dim=0)
+                    emb_importance = emb_over_batch.sum(dim=0)
+
                     if name not in importance_scores["embedding_channels"]:
-                        importance_scores["embedding_channels"][name] = torch.zeros(embedding_sum.size(), device=embedding_sum.device)
-                    importance_scores["embedding_channels"][name] += embedding_sum
+                        importance_scores["embedding_channels"][name] = torch.zeros(emb_importance.size(), device=emb_importance.device)
+                    importance_scores["embedding_channels"][name] += emb_importance
                 
                 else:
                     print("\n\n\n---------------------------------------------------------\n")
@@ -321,7 +327,7 @@ def prune_and_knowledge_distillation(train_data, valid_data, test_data):
         pruning_axes=["width", "depth"],
         use_bi_for_depth=True
     )
-
+    
     # Knowledge distillation setup
     teacher_model = lora_model
     optimizer = torch.optim.AdamW(pruned_lora_model.parameters(), lr=5e-5)
@@ -333,7 +339,7 @@ def prune_and_knowledge_distillation(train_data, valid_data, test_data):
     num_epochs = 3
     for epoch in range(num_epochs):
         epoch_loss = 0
-        for batch in dataloader:
+        for batch in train_data:
             inputs = batch["input_ids"].to(pruned_model.device)
             attention_mask = batch["attention_mask"].to(pruned_model.device)
             
