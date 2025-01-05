@@ -52,7 +52,6 @@ def print_dataset():
 # print_dataset()
 # sst2_dataset_view()
 
-
 def print_batch_info(input_ids, model):
     print("\n\n\n---------------------------------------------------------\n")
     print("input_ids: ", input_ids)
@@ -98,3 +97,5 @@ def print_LN_info(name, emb_output, emb_over_seq, emb_over_batch, emb_importance
     print("emb_over_batch shape: ", emb_over_batch.shape, "(Expected: [D])")
     print("emb_importance: ", emb_importance)
     print("\n---------------------------------------------------------\n\n\n")
+
+
