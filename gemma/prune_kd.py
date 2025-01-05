@@ -71,25 +71,61 @@ def create_calibration_dataset(train_data, tokenizer, num_samples=1024, batch_si
     
     return calibration_loader
 
+
+
+# TODO
+# compute importance scores with various methods (L2 norm, mean, variance)
+# re-simulate minitron results    ->    is will be same results?
 def compute_width_importance_scores(model, data_loader):
     """
     Compute importance scores for heads, neurons, and embedding channels.
+    Choose L2 norm (batch) and Mean (sequence) and then summed up to compute the layer-wise importance for best zero-shot performance.
+
+    Activations from the Model, input shape: (B, S, D), where:
+        B: Batch size
+        S: Sequence length (number of tokens in each sequence)
+        D: Model dimensions (neurons, heads, or embedding channels)
+    
     """
-    importance_scores = {"heads": {}, "neurons": {}, "embeddings": {}}
+    print_once = True
+
+    importance_scores = {"heads": {}, "neurons": {}, "embedding_channels": {}}
     model.eval()
 
     with torch.no_grad():
         for batch in data_loader:
             input_ids = batch["input_ids"].to(model.device)
-            attention_mask = batch["attention_mask"].to(model.device)
+            
+            if print_once:
+                print("\n\n\n---------------------------------------------------------\n")
+                print("input_ids: ", input_ids)
+                print("input_ids shape: ", input_ids.shape)
+                print("model named modules: ", model.named_modules())
+                print("\n---------------------------------------------------------\n\n\n")
 
             for name, module in model.named_modules():
                 if isinstance(module, nn.MultiheadAttention):                    
                     query, key, value = module.q_proj(input_ids), module.k_proj(input_ids), module.v_proj(input_ids)
                     attn_output = torch.bmm(query, key.transpose(1, 2)) @ value
+                    attn_over_seq = attn_output.norm(p=2, dim=1)
+                    attn_over_batch = attn_over_seq.mean(dim=0)
+                    head_importance = attn_over_batch.sum(dim=0)
 
-                    attn_abs = attn_output.abs().norm(p=2, dim=-1)  # L2 norm of |Attn|
-                    head_importance = attn_abs.sum(dim=(0, 1))  # Sum over batch (B) and seq (S)
+                    if print_once:
+                        print("\n\n\n---------------------------------------------------------\n")
+                        print(f"Computing importance scores for module: {name}")
+                        print("projection layer's shpae is (B, S, D)")
+                        print("shape of query: ", query.shape)
+                        print("shape of key: ", key.shape)
+                        print("shape of value: ", value.shape)
+                        print("attn_output: ", attn_output)
+                        print("attn_output shape: ", attn_output.shape, "(Expected: [B, S, D])")
+                        print("attn_over_seq: ", attn_over_seq)
+                        print("attn_over_seq shape: ", attn_over_seq.shape, "(Expected: [B, D])")
+                        print("attn_over_batch: ", attn_over_batch)
+                        print("attn_over_batch shape: ", attn_over_batch.shape, "(Expected: [D])")
+                        print("head_importance: ", head_importance)
+                        print("\n---------------------------------------------------------\n\n\n")
                     
                     if name not in importance_scores["heads"]:
                         importance_scores["heads"][name] = torch.zeros(head_importance.size(), device=head_importance.device)
@@ -97,18 +133,25 @@ def compute_width_importance_scores(model, data_loader):
 
                 elif isinstance(module, nn.Linear):
                     output = module(input_ids)
-                    neuron_sum = output.sum(dim=(0, 1))  # Sum over batch (B) and seq (S)
+                    neuron_sum = output.sum(dim=(0, 1))
                     if name not in importance_scores["neurons"]:
                         importance_scores["neurons"][name] = torch.zeros(neuron_sum.size(), device=neuron_sum.device)
                     importance_scores["neurons"][name] += neuron_sum
 
                 elif isinstance(module, nn.LayerNorm):
                     ln_output = module(input_ids)
-                    embedding_sum = ln_output.sum(dim=(0, 1))  # Sum over batch (B) and seq (S)
-                    if name not in importance_scores["embeddings"]:
-                        importance_scores["embeddings"][name] = torch.zeros(embedding_sum.size(), device=embedding_sum.device)
-                    importance_scores["embeddings"][name] += embedding_sum
+                    embedding_sum = ln_output.sum(dim=(0, 1))
+                    if name not in importance_scores["embedding_channels"]:
+                        importance_scores["embedding_channels"][name] = torch.zeros(embedding_sum.size(), device=embedding_sum.device)
+                    importance_scores["embedding_channels"][name] += embedding_sum
+                
+                else:
+                    print("\n\n\n---------------------------------------------------------\n")
+                    print(f"Skipping module: {name}")
+                    print("\n---------------------------------------------------------\n\n\n")
 
+                print_once = False
+    
     for key in importance_scores.keys():
         for layer_name, scores in importance_scores[key].items():
             importance_scores[key][layer_name] = scores.mean().item()  # Example aggregation
@@ -184,7 +227,7 @@ def structured_pruning(
                 elif axis == "neurons":
                     module = dict(lora_model.named_modules())[name]
                     module.weight.data *= mask.unsqueeze(1)
-                elif axis == "embeddings":
+                elif axis == "embedding_channels":
                     module = dict(lora_model.named_modules())[name]
                     module.weight.data *= mask
 
