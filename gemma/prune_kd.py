@@ -12,6 +12,7 @@ from sklearn.metrics import classification_report, confusion_matrix
 from transformers.trainer_utils import set_seed
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
+from helper import print_batch_info, print_MHA_info, print_MLP_info, print_LN_info
 
 
 # def setup_optimizer_and_scheduler(model, learning_rate=2e-4, min_lr=4.5e-7, total_epochs=10):
@@ -51,8 +52,6 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 #         pass
 #     scheduler.step()  # Adjust learning rate after each epoch
 
-
-
 def create_calibration_dataset(train_data, tokenizer, num_samples=1024, batch_size=32):
     """
     Create a calibration dataset from the training data.
@@ -87,8 +86,6 @@ def compute_width_importance_scores(model, data_loader):
         D: Model dimensions (neurons, heads, or embedding channels)
     
     """
-    print_once = True
-
     importance_scores = {"heads": {}, "neurons": {}, "embedding_channels": {}}
     model.eval()
 
@@ -96,12 +93,7 @@ def compute_width_importance_scores(model, data_loader):
         for batch in data_loader:
             input_ids = batch["input_ids"].to(model.device)
             
-            if print_once:
-                print("\n\n\n---------------------------------------------------------\n")
-                print("input_ids: ", input_ids)
-                print("input_ids shape: ", input_ids.shape)
-                print("model named modules: ", model.named_modules())
-                print("\n---------------------------------------------------------\n\n\n")
+            print_batch_info(input_ids, model)
 
             for name, module in model.named_modules():
                 if isinstance(module, nn.MultiheadAttention):                    
@@ -111,21 +103,7 @@ def compute_width_importance_scores(model, data_loader):
                     attn_over_batch = attn_over_seq.norm(p=2, dim=0)
                     head_importance = attn_over_batch.sum(dim=0)
 
-                    if print_once:
-                        print("\n\n\n---------------------------------------------------------\n")
-                        print(f"Computing importance scores for module: {name}")
-                        print("projection layer's shpae is (B, S, D)")
-                        print("shape of query: ", query.shape)
-                        print("shape of key: ", key.shape)
-                        print("shape of value: ", value.shape)
-                        print("attn_output: ", attn_output)
-                        print("attn_output shape: ", attn_output.shape, "(Expected: [B, S, D])")
-                        print("attn_over_seq: ", attn_over_seq)
-                        print("attn_over_seq shape: ", attn_over_seq.shape, "(Expected: [B, D])")
-                        print("attn_over_batch: ", attn_over_batch)
-                        print("attn_over_batch shape: ", attn_over_batch.shape, "(Expected: [D])")
-                        print("head_importance: ", head_importance)
-                        print("\n---------------------------------------------------------\n\n\n")
+                    print_MHA_info(name, query, key, value, attn_output, attn_over_seq, attn_over_batch, head_importance)
                     
                     if name not in importance_scores["heads"]:
                         importance_scores["heads"][name] = torch.zeros(head_importance.size(), device=head_importance.device)
@@ -136,6 +114,8 @@ def compute_width_importance_scores(model, data_loader):
                     neuron_over_seq = neuron_output.mean(dim=1)
                     neuron_over_batch = neuron_over_seq.norm(p=2, dim=0)
                     neuron_importance = neuron_over_batch.sum(dim=0)
+
+                    print_MLP_info(neuron_output, neuron_over_seq, neuron_over_batch, neuron_importance)
                     
                     if name not in importance_scores["neurons"]:
                         importance_scores["neurons"][name] = torch.zeros(neuron_importance.size(), device=neuron_importance.device)
@@ -147,6 +127,8 @@ def compute_width_importance_scores(model, data_loader):
                     emb_over_batch = emb_over_seq.norm(p=2, dim=0)
                     emb_importance = emb_over_batch.sum(dim=0)
 
+                    print_LN_info(name, emb_output, emb_over_seq, emb_over_batch, emb_importance)
+
                     if name not in importance_scores["embedding_channels"]:
                         importance_scores["embedding_channels"][name] = torch.zeros(emb_importance.size(), device=emb_importance.device)
                     importance_scores["embedding_channels"][name] += emb_importance
@@ -155,13 +137,7 @@ def compute_width_importance_scores(model, data_loader):
                     print("\n\n\n---------------------------------------------------------\n")
                     print(f"Skipping module: {name}")
                     print("\n---------------------------------------------------------\n\n\n")
-
-                print_once = False
     
-    for key in importance_scores.keys():
-        for layer_name, scores in importance_scores[key].items():
-            importance_scores[key][layer_name] = scores.mean().item()  # Example aggregation
-
     return importance_scores
 
 def compute_perplexity(model, dataset):
@@ -327,7 +303,7 @@ def prune_and_knowledge_distillation(train_data, valid_data, test_data):
         pruning_axes=["width", "depth"],
         use_bi_for_depth=True
     )
-    
+
     # Knowledge distillation setup
     teacher_model = lora_model
     optimizer = torch.optim.AdamW(pruned_lora_model.parameters(), lr=5e-5)

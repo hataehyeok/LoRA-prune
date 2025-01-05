@@ -50,4 +50,51 @@ def print_dataset():
 
 
 # print_dataset()
-sst2_dataset_view()
+# sst2_dataset_view()
+
+
+def print_batch_info(input_ids, model):
+    print("\n\n\n---------------------------------------------------------\n")
+    print("input_ids: ", input_ids)
+    print("input_ids shape: ", input_ids.shape)
+    print("model named modules: ", model.named_modules())
+    print("\n---------------------------------------------------------\n\n\n")
+
+def print_MHA_info(name, query, key, value, attn_output, attn_over_seq, attn_over_batch, head_importance):
+    print("\n\n\n---------------------------------------------------------\n")
+    print(f"Computing importance scores for module: {name}")
+    print("projection layer's shpae is (B, S, D)")
+    print("shape of query: ", query.shape)
+    print("shape of key: ", key.shape)
+    print("shape of value: ", value.shape)
+    print("attn_output: ", attn_output)
+    print("attn_output shape: ", attn_output.shape, "(Expected: [B, S, D])")
+    print("attn_over_seq: ", attn_over_seq)
+    print("attn_over_seq shape: ", attn_over_seq.shape, "(Expected: [B, D])")
+    print("attn_over_batch: ", attn_over_batch)
+    print("attn_over_batch shape: ", attn_over_batch.shape, "(Expected: [D])")
+    print("head_importance: ", head_importance)
+    print("\n---------------------------------------------------------\n\n\n")
+
+def print_MLP_info(neuron_output, neuron_over_seq, neuron_over_batch, neuron_importance):
+    print("\n\n\n---------------------------------------------------------\n")
+    print("neuron_output: ", neuron_output)
+    print("neuron_output shape: ", neuron_output.shape, "(Expected: [B, S, D])")
+    print("neuron_over_seq: ", neuron_over_seq)
+    print("neuron_over_seq shape: ", neuron_over_seq.shape, "(Expected: [B, D])")
+    print("neuron_over_batch: ", neuron_over_batch)
+    print("neuron_over_batch shape: ", neuron_over_batch.shape, "(Expected: [D])")
+    print("neuron_importance: ", neuron_importance)
+    print("\n---------------------------------------------------------\n\n\n")
+
+def print_LN_info(name, emb_output, emb_over_seq, emb_over_batch, emb_importance):
+    print("\n\n\n---------------------------------------------------------\n")
+    print(f"Computing importance scores for module: {name}")
+    print("emb_output: ", emb_output)
+    print("emb_output shape: ", emb_output.shape, "(Expected: [B, S, D])")
+    print("emb_over_seq: ", emb_over_seq)
+    print("emb_over_seq shape: ", emb_over_seq.shape, "(Expected: [B, D])")
+    print("emb_over_batch: ", emb_over_batch)
+    print("emb_over_batch shape: ", emb_over_batch.shape, "(Expected: [D])")
+    print("emb_importance: ", emb_importance)
+    print("\n---------------------------------------------------------\n\n\n")
