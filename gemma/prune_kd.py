@@ -100,8 +100,6 @@ def compute_width_importance_scores(model, data_loader):
                     attn_over_seq = attn_output.mean(dim=1)
                     attn_over_batch = attn_over_seq.norm(p=2, dim=0)
                     head_importance = attn_over_batch.sum(dim=0)
-
-                    print_MHA_info(name, query, key, value, attn_output, attn_over_seq, attn_over_batch, head_importance)
                     
                     if name not in importance_scores["heads"]:
                         importance_scores["heads"][name] = torch.zeros(head_importance.size(), device=head_importance.device)
@@ -112,8 +110,6 @@ def compute_width_importance_scores(model, data_loader):
                     neuron_over_seq = neuron_output.mean(dim=1)
                     neuron_over_batch = neuron_over_seq.norm(p=2, dim=0)
                     neuron_importance = neuron_over_batch.sum(dim=0)
-
-                    print_MLP_info(neuron_output, neuron_over_seq, neuron_over_batch, neuron_importance)
                     
                     if name not in importance_scores["neurons"]:
                         importance_scores["neurons"][name] = torch.zeros(neuron_importance.size(), device=neuron_importance.device)
@@ -124,8 +120,6 @@ def compute_width_importance_scores(model, data_loader):
                     emb_over_seq = emb_output.mean(dim=1)
                     emb_over_batch = emb_over_seq.norm(p=2, dim=0)
                     emb_importance = emb_over_batch.sum(dim=0)
-
-                    print_LN_info(name, emb_output, emb_over_seq, emb_over_batch, emb_importance)
 
                     if name not in importance_scores["embedding_channels"]:
                         importance_scores["embedding_channels"][name] = torch.zeros(emb_importance.size(), device=emb_importance.device)
@@ -261,6 +255,8 @@ def knowledge_distillation(pruned_model, teacher_model, dataloader, optimizer, n
     
     return pruned_model
 
+# TODO
+# setup the vary sparsity
 def prune_and_knowledge_distillation(train_data, valid_data, test_data):
     """Prune the fine-tuned model and perform knowledge distillation."""
     
@@ -281,25 +277,17 @@ def prune_and_knowledge_distillation(train_data, valid_data, test_data):
     )
     
     tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
-    lora_model = PeftModel.from_pretrained(base_model, ADAPTER_MODEL, device_map="auto", torch_dtype=torch.float16)
+    lora_adapter = PeftModel.from_pretrained(base_model, ADAPTER_MODEL, device_map="auto", torch_dtype=torch.float16)
     calibration_dataset = create_calibration_dataset(train_data, tokenizer, num_samples=1024, batch_size=32)
 
     # Structured pruning
-    print("\n\n\n------------------ model pruning ------------------\n\n\n")
-    sparsity_config = {"width": 0.5, "depth": 0.3}
-    pruned_model = structured_pruning(
-        lora_model,
-        calibration_dataset,
-        sparsity=sparsity_config,
-        pruning_axes=["width", "depth"],
-        use_bi_for_depth=True
-    )
+    pruned_adapter = structured_pruning(lora_adapter, calibration_dataset, sparsity={"width": 0.5, "depth": 0.5})
 
     # Knowledge distillation setup
-    teacher_model = lora_model
-    optimizer = torch.optim.AdamW(pruned_lora_model.parameters(), lr=5e-5)
+    teacher_model = lora_adapter
+    optimizer = torch.optim.AdamW(pruned_adapter.parameters(), lr=5e-5)
     loss_fn = nn.MSELoss()
-    pruned_model = pruned_lora_model
+    pruned_model = pruned_adapter
     pruned_model.train()
     
     # Training the pruned model
@@ -330,7 +318,6 @@ def prune_and_knowledge_distillation(train_data, valid_data, test_data):
 
     print("\n\-----------Done KD-----------\n")
 
-
     # Save the pruned model
     PRUNED_ADAPTER_MODEL = "pruned_lora_adapter"
     pruned_lora_model.save_pretrained(PRUNED_ADAPTER_MODEL)
@@ -338,30 +325,3 @@ def prune_and_knowledge_distillation(train_data, valid_data, test_data):
     base_model = AutoModelForCausalLM.from_pretrained(BASE_MODEL, device_map="auto", torch_dtype=torch.float16)
     final_model = PeftModel.from_pretrained(base_model, PRUNED_ADAPTER_MODEL)
     final_model.save_pretrained("gemma-2b-it-sst2-pruned")
-
-
-# Main Test Script
-if __name__ == "__main__":
-    BASE_MODEL = "google/gemma-2b-it"
-    ADAPTER_MODEL = "lora_adapter"
-
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.float16
-    )
-
-    base_model = AutoModelForCausalLM.from_pretrained(
-        BASE_MODEL,
-        quantization_config=bnb_config,
-        device_map="auto",
-        low_cpu_mem_usage=True,
-    )
-    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
-    lora_model = PeftModel.from_pretrained(base_model, ADAPTER_MODEL, device_map="auto", torch_dtype=torch.float16)
-
-    train_data, _, _ = dataset_loading()
-    calibration_dataset = create_calibration_dataset(train_data, tokenizer, num_samples=1024, batch_size=32)
-
-    importance_scores = compute_width_importance_scores(lora_model, calibration_dataset)
-    print("\nFinal Importance Scores: ", importance_scores)
