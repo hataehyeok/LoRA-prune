@@ -177,13 +177,57 @@ def compute_block_importance(model, dataset):
         bi_scores[name] = 1 - cosine_similarity.mean().item()
     return bi_scores
 
-def structured_pruning(
-    lora_model,
-    calibration_dataset,
-    sparsity={"width": 0.5, "depth": 0.5},
-    pruning_axes=["width", "depth"],
-    use_bi_for_depth=True
-):
+def width_pruning(lora_adapter, calibration_dataset, sparsity):
+    """
+    Perform width pruning on the model, directly modifying its layers (heads, neurons, embedding channels).
+    """
+    importance_scores = compute_width_importance_scores(lora_adapter, calibration_dataset)
+
+    for axis, scores in importance_scores.items():
+        threshold = torch.quantile(torch.tensor(list(scores.values())), sparsity["width"])
+        
+        for name, score in scores.items():
+            if score < threshold:
+                if "." in name:
+                    parent_name, layer_name = name.rsplit(".", 1)
+                    parent_module = dict(lora_adapter.named_modules())[parent_name]
+                else:
+                    parent_name, layer_name = "", name
+                    parent_module = lora_adapter
+
+                module = getattr(parent_module, layer_name)
+
+                if axis == "heads" and hasattr(module, "prune_heads"):
+                    heads_to_keep = torch.tensor([score >= threshold for score in scores.values()])
+                    module.prune_heads(heads_to_keep)
+                elif axis == "neurons":
+                    mask = score >= threshold
+                    module.weight.data *= mask.unsqueeze(1)
+                elif axis == "embedding_channels":
+                    mask = score >= threshold
+                    module.weight.data *= mask
+                else:
+                    raise ValueError(f"Invalid axis or pruning not supported for module: {name}")
+
+                if axis in ["heads", "neurons", "embedding_channels"]:
+                    setattr(parent_module, layer_name, module)
+
+    return lora_adapter
+
+def depth_pruning(lora_adapter, calibration_dataset, sparsity):
+    bi_scores = compute_block_importance(lora_adapter, calibration_dataset)
+    threshold = torch.quantile(torch.tensor(list(bi_scores.values())), sparsity)
+
+    for name, act in bi_scores.items():
+        if act < threshold:
+            # ..????
+            parent_name, layer_name = name.rsplit('.', 1)
+            parent_module = dict(lora_adapter.named_modules())[parent_name]
+            setattr(parent_module, layer_name, nn.Identity())
+    
+    return lora_adapter
+
+def structured_pruning(lora_adapter, calibration_dataset, sparsity):
     """
     Perform structured pruning on the model.
         - Prunes MLP, ATT, and EMB layers
@@ -192,57 +236,10 @@ def structured_pruning(
         - Supports Perplexity (PPL) and Block Importance (BI) for depth pruning
     """
 
-    if "width" in pruning_axes:
-        importance_scores = compute_width_importance_scores(lora_model, calibration_dataset)
-        for axis, scores in importance_scores.items():
-            threshold = torch.quantile(torch.tensor(list(scores.values())), sparsity["width"])
-            binary_mask = torch.tensor([score >= threshold for score in scores.values()])
+    width_pruned_lora_adapter = width_pruning(lora_adapter, calibration_dataset, sparsity["width"])
+    depth_pruned_lora_adapter = depth_pruning(width_pruned_lora_adapter, calibration_dataset, sparsity["depth"])
 
-            if axis == "heads":
-                for name, score in scores.items():
-                    module = dict(lora_model.named_modules())[name]
-                    module.prune_heads(binary_mask)
-            elif axis == "neurons":
-                for name, score in scores.items():
-                    module = dict(lora_model.named_modules())[name]
-                    module.weight.data *= binary_mask.unsqueeze(1)
-            elif axis == "embedding_channels":
-                for name, score in scores.items():
-                    module = dict(lora_model.named_modules())[name]
-                    module.weight.data *= binary_mask
-            else:
-                raise ValueError(f"Invalid axis: {axis}")
-
-    if "depth" in pruning_axes:
-        if use_bi_for_depth:
-            bi_scores = compute_block_importance(lora_model, calibration_dataset)
-            for name, score in bi_scores.items():
-                if score < sparsity["depth"]:
-                    module = dict(lora_model.named_modules())[name]
-                    module = nn.Identity()  # Replace block with no-op
-        else:
-            # Use Perplexity (PPL)
-            original_perplexity = compute_perplexity(lora_model, calibration_dataset)
-            layer_importance = {}
-            for name, module in lora_model.named_modules():
-                if isinstance(module, nn.ModuleList):
-                    for i, layer in enumerate(module):
-                        temp_model = lora_model.clone()
-                        temp_model.module[i] = nn.Identity()
-                        perplexity = compute_perplexity(temp_model, calibration_dataset)
-                        layer_importance[f"{name}.{i}"] = perplexity - original_perplexity
-
-            # Rank layers and prune
-            ranked_layers = sorted(layer_importance, key=layer_importance.get, reverse=True)
-            num_layers_to_prune = int(len(ranked_layers) * sparsity["depth"])
-            for layer in ranked_layers[:num_layers_to_prune]:
-                name, idx = layer.split(".")
-                idx = int(idx)
-                dict(lora_model.named_modules())[name].module[int(idx)] = nn.Identity()
-
-    return lora_model
-
-
+    return depth_pruned_lora_adapter
 
 def knowledge_distillation(pruned_model, teacher_model, dataloader, optimizer, num_epochs=3):
     loss_fn = nn.MSELoss()
