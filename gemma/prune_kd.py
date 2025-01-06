@@ -269,7 +269,8 @@ def knowledge_distill(lora_adapter, pruned_adapter, train_data):
 # Instead of performing one-shot pruning (pruning everything in a single step)
 # , iterative pruning splits the process into multiple iterations (T) to allow the model to gradually adapt.
 # iterative importance estimation and pruning -> iter 4 -> 
-def prune_and_knowledge_distillation(train_data, valid_data, test_data, iter = 4):
+# measure the initial validation loss and final validation loss with various iteration
+def prune_and_knowledge_distillation(train_data, valid_data, test_data, is_iter_prune = False, iter = 4):
     """Prune the fine-tuned model and perform knowledge distillation."""
     
     BASE_MODEL = "google/gemma-2b-it"
@@ -292,16 +293,21 @@ def prune_and_knowledge_distillation(train_data, valid_data, test_data, iter = 4
     lora_adapter = PeftModel.from_pretrained(base_model, ADAPTER_MODEL, device_map="auto", torch_dtype=torch.float16)
     calibration_dataset = create_calibration_dataset(train_data, tokenizer, num_samples=1024, batch_size=32)
 
-    for i in range(iter):
-        d_s = 1
-        d_t = 0.5
-        importance_iter = d_s - (i * ((d_s - d_t) / iter))
-        prune_iter = d_s - (i+1) * ((d_s - d_t) / iter)
+    if is_iter_prune:
+        for i in range(iter):
+            d_s = 1
+            d_t = 0.5
+            importance_iter = d_s - (i * ((d_s - d_t) / iter))
+            prune_iter = d_s - (i+1) * ((d_s - d_t) / iter)
 
-        sparsity = {"width": prune_iter, "depth": prune_iter}
-        pruned_adapter = structured_pruning(lora_adapter, calibration_dataset, sparsity, importance_iter)
+            sparsity = {"width": prune_iter, "depth": prune_iter}
+            pruned_adapter = structured_pruning(lora_adapter, calibration_dataset, sparsity, importance_iter)
+            kd_adapter = knowledge_distill(lora_adapter, pruned_adapter, train_data)
+            lora_adapter = kd_adapter
+    else:
+        sparsity = {"width": 0.5, "depth": 0.5}
+        pruned_adapter = structured_pruning(lora_adapter, calibration_dataset, sparsity, 1)
         kd_adapter = knowledge_distill(lora_adapter, pruned_adapter, train_data)
-        lora_adapter = kd_adapter
 
     PRUNED_ADAPTER_MODEL = "pruned_lora_adapter"
     kd_adapter.save_pretrained(PRUNED_ADAPTER_MODEL)
