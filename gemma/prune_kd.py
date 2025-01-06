@@ -136,45 +136,39 @@ def compute_width_importance_scores(model, data_loader):
     
     return importance_scores
 
-def compute_perplexity(model, dataset):
-    """Compute perplexity (PPL) of the model on a dataset."""
-    model.eval()
-    total_loss = 0
-    count = 0
-    with torch.no_grad():
-        for input_data in dataset:
-            output = model(input_data)
-            logits = output.logits  # Assuming logits are returned
-            labels = input_data["labels"]  # Adjust based on your dataset
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), labels.view(-1))
-            total_loss += loss.item()
-            count += 1
-    return torch.exp(torch.tensor(total_loss / count))
+# TODO
+# perplexity vs. block importance
+def compute_block_importance(model, data_loader):
+    """
+    Compute block importance (BI) for layers.
+    BI is computed as 1 - cosine similarity between the input and output of the layer.
 
-def compute_block_importance(model, dataset):
-    """Compute block importance (BI) for layers."""
-    activations = {}
+    Iterates over batches
+        input: a batch of input data from the DataLoader
+        output: is used to compute the layer activation
+
+    """
+    activation = {}
     model.eval()
     with torch.no_grad():
-        for input_data in dataset:
-            output = model(input_data)
+        for input in data_loader:
+            output = model(input)
             for name, module in model.named_modules():
                 if isinstance(module, nn.ModuleList):
-                    if name not in activations:
-                        activations[name] = {"input": [], "output": []}
+                    if name not in activation:
+                        activation[name] = {"input": [], "output": []}
                     for layer in module:
-                        # Capture input and output activations for each block
-                        input_act = layer(input_data)  # Adjust based on your forward logic
-                        activations[name]["input"].append(input_act.cpu())
-                        activations[name]["output"].append(output.cpu())
+                        input_act = layer(input)
+                        activation[name]["input"].append(input_act.cpu())
+                        activation[name]["output"].append(output.cpu())
     bi_scores = {}
-    for name, act in activations.items():
+    for name, act in activation.items():
         X_i = torch.cat(act["input"], dim=0)
         X_i_plus_1 = torch.cat(act["output"], dim=0)
-        cosine_similarity = (X_i * X_i_plus_1).sum(dim=-1) / (
+        cosine_similarity = (X_i * X_i_plus_1).mean(dim=-1) / (
             torch.norm(X_i, dim=-1) * torch.norm(X_i_plus_1, dim=-1)
         )
-        bi_scores[name] = 1 - cosine_similarity.mean().item()
+        bi_scores[name] = 1 - cosine_similarity
     return bi_scores
 
 def width_pruning(lora_adapter, calibration_dataset, sparsity):
