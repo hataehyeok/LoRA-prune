@@ -73,7 +73,8 @@ def create_calibration_dataset(train_data, tokenizer, num_samples=1024, batch_si
 # TODO
 # compute importance scores with various methods (L2 norm, mean, variance)
 # re-simulate minitron results    ->    is will be same results?
-def compute_width_importance_scores(model, data_loader):
+# importance_iter
+def compute_width_importance_scores(model, data_loader, importance_iter):
     """
     Compute importance scores for heads, neurons, and embedding channels.
     Choose L2 norm (batch) and Mean (sequence) and then summed up to compute the layer-wise importance for best zero-shot performance.
@@ -132,7 +133,8 @@ def compute_width_importance_scores(model, data_loader):
 
 # TODO
 # perplexity vs. block importance
-def compute_block_importance(model, data_loader):
+# importance_iter
+def compute_block_importance(model, data_loader, importance_iter):
     """
     Compute block importance (BI) for layers.
     BI is computed as 1 - cosine similarity between the input and output of the layer.
@@ -165,11 +167,11 @@ def compute_block_importance(model, data_loader):
         bi_scores[name] = 1 - cosine_similarity
     return bi_scores
 
-def width_pruning(lora_adapter, calibration_dataset, sparsity):
+def width_pruning(lora_adapter, calibration_dataset, sparsity, importance_iter):
     """
     Perform width pruning on the model, directly modifying its layers (heads, neurons, embedding channels).
     """
-    importance_scores = compute_width_importance_scores(lora_adapter, calibration_dataset)
+    importance_scores = compute_width_importance_scores(lora_adapter, calibration_dataset, importance_iter)
 
     for axis, scores in importance_scores.items():
         threshold = torch.quantile(torch.tensor(list(scores.values())), sparsity["width"])
@@ -202,8 +204,8 @@ def width_pruning(lora_adapter, calibration_dataset, sparsity):
 
     return lora_adapter
 
-def depth_pruning(lora_adapter, calibration_dataset, sparsity):
-    bi_scores = compute_block_importance(lora_adapter, calibration_dataset)
+def depth_pruning(lora_adapter, calibration_dataset, sparsity, importance_iter):
+    bi_scores = compute_block_importance(lora_adapter, calibration_dataset, importance_iter)
     threshold = torch.quantile(torch.tensor(list(bi_scores.values())), sparsity)
 
     for name, act in bi_scores.items():
@@ -215,7 +217,7 @@ def depth_pruning(lora_adapter, calibration_dataset, sparsity):
     
     return lora_adapter
 
-def structured_pruning(lora_adapter, calibration_dataset, sparsity):
+def structured_pruning(lora_adapter, calibration_dataset, sparsity, importance_iter):
     """
     Perform structured pruning on the model.
         - Prunes MLP, ATT, and EMB layers
@@ -224,66 +226,12 @@ def structured_pruning(lora_adapter, calibration_dataset, sparsity):
         - Supports Perplexity (PPL) and Block Importance (BI) for depth pruning
     """
 
-    width_pruned_lora_adapter = width_pruning(lora_adapter, calibration_dataset, sparsity["width"])
-    depth_pruned_lora_adapter = depth_pruning(width_pruned_lora_adapter, calibration_dataset, sparsity["depth"])
+    width_pruned_lora_adapter = width_pruning(lora_adapter, calibration_dataset, sparsity["width"], importance_iter)
+    depth_pruned_lora_adapter = depth_pruning(width_pruned_lora_adapter, calibration_dataset, sparsity["depth"], importance_iter)
 
     return depth_pruned_lora_adapter
 
-def knowledge_distillation(pruned_model, teacher_model, dataloader, optimizer, num_epochs=3):
-    loss_fn = nn.MSELoss()
-    pruned_model.train()
-    
-    for epoch in range(num_epochs):
-        epoch_loss = 0
-        for batch in dataloader:
-            inputs = batch["input_ids"].to(pruned_model.device)
-            attention_mask = batch["attention_mask"].to(pruned_model.device)
-            
-            with torch.no_grad():
-                teacher_outputs = teacher_model(input_ids=inputs, attention_mask=attention_mask).logits
-            
-            student_outputs = pruned_model(input_ids=inputs, attention_mask=attention_mask).logits
-            loss = loss_fn(student_outputs, teacher_outputs)
-            
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            
-            epoch_loss += loss.item()
-        
-        print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {epoch_loss:.4f}")
-    
-    return pruned_model
-
-# TODO
-# setup the vary sparsity
-def prune_and_knowledge_distillation(train_data, valid_data, test_data):
-    """Prune the fine-tuned model and perform knowledge distillation."""
-    
-    BASE_MODEL = "google/gemma-2b-it"
-    ADAPTER_MODEL = "lora_adapter"
-
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.float16
-    )
-    
-    base_model = AutoModelForCausalLM.from_pretrained(
-        BASE_MODEL,
-        quantization_config=bnb_config,
-        device_map="auto",
-        low_cpu_mem_usage=True,
-    )
-    
-    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
-    lora_adapter = PeftModel.from_pretrained(base_model, ADAPTER_MODEL, device_map="auto", torch_dtype=torch.float16)
-    calibration_dataset = create_calibration_dataset(train_data, tokenizer, num_samples=1024, batch_size=32)
-
-    # Structured pruning
-    pruned_adapter = structured_pruning(lora_adapter, calibration_dataset, sparsity={"width": 0.5, "depth": 0.5})
-
-    # Knowledge distillation setup
+def knowledge_distill(lora_adapter, pruned_adapter, train_data):
     teacher_model = lora_adapter
     optimizer = torch.optim.AdamW(pruned_adapter.parameters(), lr=5e-5)
     loss_fn = nn.MSELoss()
@@ -313,14 +261,50 @@ def prune_and_knowledge_distillation(train_data, valid_data, test_data):
             epoch_loss += loss.item()
         
         print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {epoch_loss:.4f}")
+
+    return pruned_model
+
+# TODO
+# setup the vary sparsity
+# Instead of performing one-shot pruning (pruning everything in a single step)
+# , iterative pruning splits the process into multiple iterations (T) to allow the model to gradually adapt.
+# iterative importance estimation and pruning -> iter 4 -> 
+def prune_and_knowledge_distillation(train_data, valid_data, test_data, iter = 4):
+    """Prune the fine-tuned model and perform knowledge distillation."""
     
-    pruned_lora_model = pruned_model
+    BASE_MODEL = "google/gemma-2b-it"
+    ADAPTER_MODEL = "lora_adapter"
 
-    print("\n\-----------Done KD-----------\n")
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.float16
+    )
+    
+    base_model = AutoModelForCausalLM.from_pretrained(
+        BASE_MODEL,
+        quantization_config=bnb_config,
+        device_map="auto",
+        low_cpu_mem_usage=True,
+    )
+    
+    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
+    lora_adapter = PeftModel.from_pretrained(base_model, ADAPTER_MODEL, device_map="auto", torch_dtype=torch.float16)
+    calibration_dataset = create_calibration_dataset(train_data, tokenizer, num_samples=1024, batch_size=32)
 
-    # Save the pruned model
+    for i in range(iter):
+        d_s = 1
+        d_t = 0.5
+        importance_iter = d_s - (i * ((d_s - d_t) / iter))
+        prune_iter = d_s - (i+1) * ((d_s - d_t) / iter)
+
+        sparsity = {"width": prune_iter, "depth": prune_iter}
+        pruned_adapter = structured_pruning(lora_adapter, calibration_dataset, sparsity, importance_iter)
+        kd_adapter = knowledge_distill(lora_adapter, pruned_adapter, train_data)
+        lora_adapter = kd_adapter
+
     PRUNED_ADAPTER_MODEL = "pruned_lora_adapter"
-    pruned_lora_model.save_pretrained(PRUNED_ADAPTER_MODEL)
+    kd_adapter.save_pretrained(PRUNED_ADAPTER_MODEL)
 
     base_model = AutoModelForCausalLM.from_pretrained(BASE_MODEL, device_map="auto", torch_dtype=torch.float16)
     final_model = PeftModel.from_pretrained(base_model, PRUNED_ADAPTER_MODEL)
