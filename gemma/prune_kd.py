@@ -13,7 +13,7 @@ from transformers.trainer_utils import set_seed
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from helper import print_batch_info, print_MHA_info, print_MLP_info, print_LN_info
-
+from ft import dataset_loading
 
 # def setup_optimizer_and_scheduler(model, learning_rate=2e-4, min_lr=4.5e-7, total_epochs=10):
 #     """
@@ -69,8 +69,6 @@ def create_calibration_dataset(train_data, tokenizer, num_samples=1024, batch_si
     calibration_loader = DataLoader(calibration_subset, batch_size=batch_size, shuffle=False)
     
     return calibration_loader
-
-
 
 # TODO
 # compute importance scores with various methods (L2 norm, mean, variance)
@@ -134,9 +132,7 @@ def compute_width_importance_scores(model, data_loader):
                     importance_scores["embedding_channels"][name] += emb_importance
                 
                 else:
-                    print("\n\n\n---------------------------------------------------------\n")
-                    print(f"Skipping module: {name}")
-                    print("\n---------------------------------------------------------\n\n\n")
+                    raise ValueError(f"Skipping module: {name}")
     
     return importance_scores
 
@@ -198,20 +194,24 @@ def structured_pruning(
 
     if "width" in pruning_axes:
         importance_scores = compute_width_importance_scores(lora_model, calibration_dataset)
-
         for axis, scores in importance_scores.items():
-            for name, score in scores.items():
-                threshold = torch.quantile(torch.tensor(score), sparsity["width"])
-                mask = torch.tensor(score) >= threshold
-                if axis == "heads":
+            threshold = torch.quantile(torch.tensor(list(scores.values())), sparsity["width"])
+            binary_mask = torch.tensor([score >= threshold for score in scores.values()])
+
+            if axis == "heads":
+                for name, score in scores.items():
                     module = dict(lora_model.named_modules())[name]
-                    module.prune_heads(mask)
-                elif axis == "neurons":
+                    module.prune_heads(binary_mask)
+            elif axis == "neurons":
+                for name, score in scores.items():
                     module = dict(lora_model.named_modules())[name]
-                    module.weight.data *= mask.unsqueeze(1)
-                elif axis == "embedding_channels":
+                    module.weight.data *= binary_mask.unsqueeze(1)
+            elif axis == "embedding_channels":
+                for name, score in scores.items():
                     module = dict(lora_model.named_modules())[name]
-                    module.weight.data *= mask
+                    module.weight.data *= binary_mask
+            else:
+                raise ValueError(f"Invalid axis: {axis}")
 
     if "depth" in pruning_axes:
         if use_bi_for_depth:
@@ -347,3 +347,30 @@ def prune_and_knowledge_distillation(train_data, valid_data, test_data):
     base_model = AutoModelForCausalLM.from_pretrained(BASE_MODEL, device_map="auto", torch_dtype=torch.float16)
     final_model = PeftModel.from_pretrained(base_model, PRUNED_ADAPTER_MODEL)
     final_model.save_pretrained("gemma-2b-it-sst2-pruned")
+
+
+# Main Test Script
+if __name__ == "__main__":
+    BASE_MODEL = "google/gemma-2b-it"
+    ADAPTER_MODEL = "lora_adapter"
+
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype=torch.float16
+    )
+
+    base_model = AutoModelForCausalLM.from_pretrained(
+        BASE_MODEL,
+        quantization_config=bnb_config,
+        device_map="auto",
+        low_cpu_mem_usage=True,
+    )
+    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
+    lora_model = PeftModel.from_pretrained(base_model, ADAPTER_MODEL, device_map="auto", torch_dtype=torch.float16)
+
+    train_data, _, _ = dataset_loading()
+    calibration_dataset = create_calibration_dataset(train_data, tokenizer, num_samples=1024, batch_size=32)
+
+    importance_scores = compute_width_importance_scores(lora_model, calibration_dataset)
+    print("\nFinal Importance Scores: ", importance_scores)
