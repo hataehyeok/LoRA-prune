@@ -210,7 +210,6 @@ def depth_pruning(lora_adapter, calibration_dataset, sparsity, importance_iter):
 
     for name, act in bi_scores.items():
         if act < threshold:
-            # ..????
             parent_name, layer_name = name.rsplit('.', 1)
             parent_module = dict(lora_adapter.named_modules())[parent_name]
             setattr(parent_module, layer_name, nn.Identity())
@@ -308,7 +307,8 @@ def prune_and_knowledge_distillation(train_data, valid_data, test_data, is_iter_
         sparsity = {"width": 0.5, "depth": 0.5}
         pruned_adapter = structured_pruning(lora_adapter, calibration_dataset, sparsity, 1)
         kd_adapter = knowledge_distill(lora_adapter, pruned_adapter, train_data)
-
+    
+    
     PRUNED_ADAPTER_MODEL = "pruned_lora_adapter"
     kd_adapter.save_pretrained(PRUNED_ADAPTER_MODEL)
 
