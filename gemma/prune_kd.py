@@ -91,8 +91,6 @@ def compute_width_importance_scores(model, data_loader, importance_iter):
     with torch.no_grad():
         for batch in data_loader:
             input_ids = batch["input_ids"].to(model.device)
-            
-            print_batch_info(input_ids, model)
 
             for name, module in model.named_modules():
                 if isinstance(module, nn.MultiheadAttention):                    
@@ -236,84 +234,133 @@ def conventional_retraining(lora_adapter, train_data, valid_data):
 
 def logit_kd_loss(teacher_logits, student_logits, temperature=1.0):
     """
-    Compute the logit-based Knowledge Distillation (KD) loss.
-    
+    Compute logit-based KD loss averaged over the sequence length (L_logits).
+
     Args:
-        teacher_logits: Logits from the teacher model (B, S, V).
-        student_logits: Logits from the student model (B, S, V).
-        temperature: Softmax temperature.
+        teacher_logits (torch.Tensor): Teacher logits (B, S, V).
+        student_logits (torch.Tensor): Student logits (B, S, V).
+        temperature (float): Softmax temperature.
 
     Returns:
-        Logit-based KD loss.
+        torch.Tensor: Logit-based KD loss (averaged over sequence length).
     """
-    teacher_probs = F.softmax(teacher_logits / temperature, dim=-1)
-    student_probs = F.log_softmax(student_logits / temperature, dim=-1)
-    loss = F.kl_div(student_probs, teacher_probs, reduction="batchmean") * (temperature ** 2)
-    return loss
+    # Compute teacher and student probabilities with temperature scaling
+    teacher_probs = F.softmax(teacher_logits / temperature, dim=-1)  # (B, S, V)
+    student_probs = F.log_softmax(student_logits / temperature, dim=-1)  # (B, S, V)
 
-def intermediate_state_kd_loss(teacher_hidden_states, student_hidden_states, linear_mapping):
+    # Compute KL divergence loss per token (across vocabulary)
+    kl_div_loss = F.kl_div(student_probs, teacher_probs, reduction="none")  # (B, S, V)
+
+    # Sum over vocabulary (dim=-1) to get loss per token, then average over sequence length
+    token_losses = kl_div_loss.sum(dim=-1).mean(dim=1)  # (B,)
+    sequence_loss = token_losses.mean()  # Scalar (averaged over batch)
+
+    return sequence_loss
+
+def intermediate_state_kd_loss(teacher_hidden_states, student_hidden_states, linear_mapping, selected_layers):
     """
-    Compute intermediate state KD loss with linear transformation.
-    
+    Compute intermediate state KD loss (L_is) averaged over the sequence length.
+
     Args:
-        teacher_hidden_states: List of teacher hidden states (post LayerNorm).
-        student_hidden_states: List of student hidden states.
-        linear_mapping: Shared linear transformation layer for student states.
+        teacher_hidden_states (List[torch.Tensor]): Teacher hidden states (B, S, D_t).
+        student_hidden_states (List[torch.Tensor]): Student hidden states (B, S, D_s).
+        linear_mapping (torch.nn.Linear): Linear transformation for student states.
+        selected_layers (List[int]): Indices of layers to use in the loss.
 
     Returns:
-        Intermediate state KD loss.
+        torch.Tensor: Intermediate state KD loss (averaged over sequence length).
     """
-    loss = 0.0
-    for teacher_state, student_state in zip(teacher_hidden_states, student_hidden_states):
-        transformed_student_state = linear_mapping(student_state)
-        loss += F.mse_loss(transformed_student_state, teacher_state)
-    return loss
+    total_loss = 0.0
+    sequence_length = teacher_hidden_states[0].size(1)
+    batch_size = teacher_hidden_states[0].size(0)
 
+    for k in selected_layers:
+        # Select hidden states for the kth layer
+        teacher_state = teacher_hidden_states[k]  # (B, S, D_t)
+        student_state = student_hidden_states[k]  # (B, S, D_s)
 
-def knowledge_distill(lora_adapter, pruned_adapter, train_data, temperature=1.0, alpha=0.5):
+        # Transform student state to match teacher's dimensionality
+        transformed_student_state = linear_mapping(student_state)  # (B, S, D_t)
+
+        # Compute loss per token and sum over sequence
+        token_losses = F.mse_loss(transformed_student_state, teacher_state, reduction="none")  # (B, S, D_t)
+        token_losses = token_losses.sum(dim=-1).mean(dim=1)  # Sum over dimensions, average over sequence (B,)
+
+        # Accumulate the layer loss
+        total_loss += token_losses.mean()  # Average over batch
+
+    # Average over sequence length and number of layers
+    total_loss /= (len(selected_layers) * sequence_length)
+
+    return total_loss
+
+def total_kd_loss(teacher_model, student_model, batch, linear_mapping, selected_layers, alpha=0.5, temperature=1.0):
     """
-    Perform knowledge distillation with logit-based and intermediate state KD losses.
-    
+    Compute the total KD loss.
+
+    Args:
+        teacher_model: Teacher model.
+        student_model: Student model.
+        batch: Input batch with 'input_ids', 'attention_mask', and 'labels'.
+        linear_mapping: Linear transformation layer.
+        selected_layers: Layers to use for intermediate state loss.
+        alpha: Weight for intermediate state KD loss.
+        temperature: Temperature for logit-based KD loss.
+
+    Returns:
+        torch.Tensor: Total KD loss.
+    """
+    inputs = batch["input_ids"].to(student_model.device)
+    attention_mask = batch["attention_mask"].to(student_model.device)
+    labels = batch["labels"].to(student_model.device)
+
+    # Teacher outputs
+    with torch.no_grad():
+        teacher_outputs = teacher_model(input_ids=inputs, attention_mask=attention_mask, output_hidden_states=True)
+        teacher_logits = teacher_outputs.logits
+        teacher_hidden_states = teacher_outputs.hidden_states
+
+    # Student outputs
+    student_outputs = student_model(input_ids=inputs, attention_mask=attention_mask, output_hidden_states=True)
+    student_logits = student_outputs.logits
+    student_hidden_states = student_outputs.hidden_states
+
+    # Loss components
+    loss_clm = F.cross_entropy(student_logits.view(-1, student_logits.size(-1)), labels.view(-1))
+    loss_logits = logit_kd_loss(teacher_logits, student_logits, temperature)
+    loss_intermediate = intermediate_state_kd_loss(teacher_hidden_states, student_hidden_states, linear_mapping, selected_layers)
+
+    # Total loss
+    total_loss = loss_clm + loss_logits + alpha * loss_intermediate
+    return total_loss
+
+# TODO
+# alpha value
+def knowledge_distill(lora_adapter, pruned_adapter, train_data, alpha=0.5, temperature=1.0, selected_layers=None):
+    """
+    Perform knowledge distillation with logit and intermediate state KD losses.
+
     Args:
         lora_adapter: Teacher model.
         pruned_adapter: Student model.
-        train_data: Training data.
-        temperature: Softmax temperature for logit KD loss.
-        alpha: Weighting coefficient for intermediate state KD loss.
+        train_data: Training dataset.
+        alpha: Weighting coefficient for intermediate state loss.
+        temperature: Temperature for logit-based KD loss.
+        selected_layers: Layers to use for intermediate state loss.
 
     Returns:
-        The distilled student model.
+        pruned_adapter: The distilled student model.
     """
     teacher_model = lora_adapter
     student_model = pruned_adapter
     optimizer = Adam(student_model.parameters(), lr=5e-5)
     linear_mapping = nn.Linear(student_model.config.hidden_size, teacher_model.config.hidden_size).to(student_model.device)
-    
+
     student_model.train()
     teacher_model.eval()
-    total_loss = 0.0
-    
-    for batch in DataLoader(train_data, batch_size=32):
-        inputs = batch["input_ids"].to(student_model.device)
-        attention_mask = batch["attention_mask"].to(student_model.device)
-        
-        # Get teacher outputs
-        with torch.no_grad():
-            teacher_outputs = teacher_model(input_ids=inputs, attention_mask=attention_mask, output_hidden_states=True)
-            teacher_logits = teacher_outputs.logits
-            teacher_hidden_states = teacher_outputs.hidden_states
-        
-        # Get student outputs
-        student_outputs = student_model(input_ids=inputs, attention_mask=attention_mask, output_hidden_states=True)
-        student_logits = student_outputs.logits
-        student_hidden_states = student_outputs.hidden_states
-        
-        # Compute losses
-        loss_logits = logit_kd_loss(teacher_logits, student_logits, temperature)
-        loss_intermediate = intermediate_state_kd_loss(teacher_hidden_states[-1:], student_hidden_states[-1:], linear_mapping)
-        total_loss = loss_logits + alpha * loss_intermediate
 
-        # Optimize student model
+    for batch in DataLoader(train_data, batch_size=32):
+        total_loss = total_kd_loss(teacher_model, student_model, batch, linear_mapping, selected_layers, alpha, temperature)
         optimizer.zero_grad()
         total_loss.backward()
         optimizer.step()
