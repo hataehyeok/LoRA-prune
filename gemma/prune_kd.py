@@ -15,6 +15,24 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from helper import print_batch_info, print_MHA_info, print_MLP_info, print_LN_info
 from ft import dataset_loading, fine_tuning
 
+"""
+Minitron Experiment Resultis and Standard
+
+- width only pruning outperforms rest, but only after retraining
+- Use (batch = L2, seq = mean) importance estimation for width axes and PPL/BI for depth
+- distill loss use KLD
+- 
+
+"""
+
+
+
+
+
+
+
+
+
 # def setup_optimizer_and_scheduler(model, learning_rate=2e-4, min_lr=4.5e-7, total_epochs=10):
 #     """
 #     Setup optimizer and cosine LR scheduler for the model.
@@ -71,8 +89,6 @@ def create_calibration_dataset(train_data, tokenizer, num_samples=1024, batch_si
     return calibration_loader
 
 # TODO
-# compute importance scores with various methods (L2 norm, mean, variance)
-# re-simulate minitron results    ->    is will be same results?
 # importance_iter
 def compute_width_importance_scores(model, data_loader, importance_iter):
     """
@@ -130,7 +146,6 @@ def compute_width_importance_scores(model, data_loader, importance_iter):
     return importance_scores
 
 # TODO
-# perplexity vs. block importance
 # importance_iter
 def compute_block_importance(model, data_loader, importance_iter):
     """
@@ -234,68 +249,39 @@ def structured_pruning(lora_adapter, calibration_dataset, sparsity, importance_i
 
     return depth_pruned_lora_adapter
 
-def conventional_retraining(lora_adapter, train_data, valid_data):
-    #TODO but not to now
-    return lora_adapter
-
 def logit_kd_loss(teacher_logits, student_logits, temperature=1.0):
     """
     Compute logit-based KD loss averaged over the sequence length (L_logits).
-
-    Args:
-        teacher_logits (torch.Tensor): Teacher logits (B, S, V).
-        student_logits (torch.Tensor): Student logits (B, S, V).
-        temperature (float): Softmax temperature.
-
-    Returns:
-        torch.Tensor: Logit-based KD loss (averaged over sequence length).
     """
-    # Compute teacher and student probabilities with temperature scaling
-    teacher_probs = F.softmax(teacher_logits / temperature, dim=-1)  # (B, S, V)
-    student_probs = F.log_softmax(student_logits / temperature, dim=-1)  # (B, S, V)
+    teacher_probs = F.softmax(teacher_logits / temperature, dim=-1)
+    student_probs = F.log_softmax(student_logits / temperature, dim=-1)
 
-    # Compute KL divergence loss per token (across vocabulary)
-    kl_div_loss = F.kl_div(student_probs, teacher_probs, reduction="none")  # (B, S, V)
+    kl_div_loss = F.kl_div(student_probs, teacher_probs, reduction="none")
 
-    # Sum over vocabulary (dim=-1) to get loss per token, then average over sequence length
-    token_losses = kl_div_loss.sum(dim=-1).mean(dim=1)  # (B,)
-    sequence_loss = token_losses.mean()  # Scalar (averaged over batch)
+    token_losses = kl_div_loss.sum(dim=-1).mean(dim=1)
+    sequence_loss = token_losses.mean()
 
     return sequence_loss
 
 def intermediate_state_kd_loss(teacher_hidden_states, student_hidden_states, linear_mapping, selected_layers):
     """
     Compute intermediate state KD loss (L_is) averaged over the sequence length.
-
-    Args:
-        teacher_hidden_states (List[torch.Tensor]): Teacher hidden states (B, S, D_t).
-        student_hidden_states (List[torch.Tensor]): Student hidden states (B, S, D_s).
-        linear_mapping (torch.nn.Linear): Linear transformation for student states.
-        selected_layers (List[int]): Indices of layers to use in the loss.
-
-    Returns:
-        torch.Tensor: Intermediate state KD loss (averaged over sequence length).
     """
     total_loss = 0.0
     sequence_length = teacher_hidden_states[0].size(1)
     batch_size = teacher_hidden_states[0].size(0)
 
     for k in selected_layers:
-        # Select hidden states for the kth layer
-        teacher_state = teacher_hidden_states[k]  # (B, S, D_t)
-        student_state = student_hidden_states[k]  # (B, S, D_s)
+        teacher_state = teacher_hidden_states[k]
+        student_state = student_hidden_states[k]
 
-        # Transform student state to match teacher's dimensionality
-        transformed_student_state = linear_mapping(student_state)  # (B, S, D_t)
+        transformed_student_state = linear_mapping(student_state)
 
-        # Compute loss per token and sum over sequence
-        token_losses = F.mse_loss(transformed_student_state, teacher_state, reduction="none")  # (B, S, D_t)
-        token_losses = token_losses.sum(dim=-1).mean(dim=1)  # Sum over dimensions, average over sequence (B,)
+        token_losses = F.mse_loss(transformed_student_state, teacher_state, reduction="none")
+        token_losses = token_losses.sum(dim=-1).mean(dim=1)
 
-        # Accumulate the layer loss
-        total_loss += token_losses.mean()  # Average over batch
+        total_loss += token_losses.mean()
 
-    # Average over sequence length and number of layers
     total_loss /= (len(selected_layers) * sequence_length)
 
     return total_loss
@@ -303,40 +289,24 @@ def intermediate_state_kd_loss(teacher_hidden_states, student_hidden_states, lin
 def total_kd_loss(teacher_model, student_model, batch, linear_mapping, selected_layers, alpha=0.5, temperature=1.0):
     """
     Compute the total KD loss.
-
-    Args:
-        teacher_model: Teacher model.
-        student_model: Student model.
-        batch: Input batch with 'input_ids', 'attention_mask', and 'labels'.
-        linear_mapping: Linear transformation layer.
-        selected_layers: Layers to use for intermediate state loss.
-        alpha: Weight for intermediate state KD loss.
-        temperature: Temperature for logit-based KD loss.
-
-    Returns:
-        torch.Tensor: Total KD loss.
     """
     inputs = batch["input_ids"].to(student_model.device)
     attention_mask = batch["attention_mask"].to(student_model.device)
     labels = batch["labels"].to(student_model.device)
 
-    # Teacher outputs
     with torch.no_grad():
         teacher_outputs = teacher_model(input_ids=inputs, attention_mask=attention_mask, output_hidden_states=True)
         teacher_logits = teacher_outputs.logits
         teacher_hidden_states = teacher_outputs.hidden_states
 
-    # Student outputs
     student_outputs = student_model(input_ids=inputs, attention_mask=attention_mask, output_hidden_states=True)
     student_logits = student_outputs.logits
     student_hidden_states = student_outputs.hidden_states
 
-    # Loss components
     loss_clm = F.cross_entropy(student_logits.view(-1, student_logits.size(-1)), labels.view(-1))
     loss_logits = logit_kd_loss(teacher_logits, student_logits, temperature)
     loss_intermediate = intermediate_state_kd_loss(teacher_hidden_states, student_hidden_states, linear_mapping, selected_layers)
 
-    # Total loss
     total_loss = loss_clm + loss_logits + alpha * loss_intermediate
     return total_loss
 
@@ -377,7 +347,7 @@ def knowledge_distill(lora_adapter, pruned_adapter, train_data, alpha=0.5, tempe
 # setup the vary sparsity
 #   Instead of performing one-shot pruning (pruning everything in a single step)
 #   , iterative pruning splits the process into multiple iterations (T) to allow the model to gradually adapt.
-def prune_and_knowledge_distillation(train_data, valid_data, test_data, is_iter_prune = False, is_process_kd = True, iter = 4):
+def prune_and_knowledge_distillation(train_data, valid_data, test_data, sparsity = {"width": 0.5, "depth": 0}, is_iter_prune = False, iter = 4):
     """
     Prune the fine-tuned model and perform knowledge distillation.
     
@@ -409,8 +379,6 @@ def prune_and_knowledge_distillation(train_data, valid_data, test_data, is_iter_
     tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
     lora_adapter = PeftModel.from_pretrained(base_model, ADAPTER_MODEL, device_map="auto", torch_dtype=torch.float16)
     calibration_dataset = create_calibration_dataset(train_data, tokenizer, num_samples=1024, batch_size=32)
-    
-    
 
     if is_iter_prune:
         for i in range(iter):
@@ -419,22 +387,12 @@ def prune_and_knowledge_distillation(train_data, valid_data, test_data, is_iter_
             importance_iter = d_s - (i * ((d_s - d_t) / iter))
             prune_iter = d_s - (i + 1) * ((d_s - d_t) / iter)
             #TODO
-            # sparsity have to have the list of iterated sparsity
-            sparsity = {"width": prune_iter, "depth": prune_iter}
             pruned_adapter = structured_pruning(lora_adapter, calibration_dataset, sparsity, importance_iter)
-            if is_process_kd:
-                kd_adapter = knowledge_distill(lora_adapter, pruned_adapter, train_data)
-            else:
-                kd_adapter = conventional_retraining(pruned_adapter, train_data, valid_data)
-            
+            kd_adapter = knowledge_distill(lora_adapter, pruned_adapter, train_data)
             lora_adapter = kd_adapter
     else:
-        sparsity = {"width": 0.5, "depth": 0}
         pruned_adapter = structured_pruning(lora_adapter, calibration_dataset, sparsity, 1)
-        if is_process_kd:
-            kd_adapter = knowledge_distill(lora_adapter, pruned_adapter, train_data)
-        else:
-            kd_adapter = conventional_retraining(pruned_adapter, train_data, valid_data)
+        kd_adapter = knowledge_distill(lora_adapter, pruned_adapter, train_data)
     
     PRUNED_ADAPTER_MODEL = "pruned_lora_adapter"
     kd_adapter.save_pretrained(PRUNED_ADAPTER_MODEL)
