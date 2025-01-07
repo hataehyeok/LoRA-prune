@@ -13,7 +13,7 @@ from transformers.trainer_utils import set_seed
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from helper import print_batch_info, print_MHA_info, print_MLP_info, print_LN_info
-from ft import dataset_loading
+from ft import dataset_loading, fine_tuning
 
 # def setup_optimizer_and_scheduler(model, learning_rate=2e-4, min_lr=4.5e-7, total_epochs=10):
 #     """
@@ -230,47 +230,112 @@ def structured_pruning(lora_adapter, calibration_dataset, sparsity, importance_i
 
     return depth_pruned_lora_adapter
 
-def knowledge_distill(lora_adapter, pruned_adapter, train_data):
-    teacher_model = lora_adapter
-    optimizer = torch.optim.AdamW(pruned_adapter.parameters(), lr=5e-5)
-    loss_fn = nn.MSELoss()
-    pruned_model = pruned_adapter
-    pruned_model.train()
-    
-    # Training the pruned model
-    num_epochs = 3
-    for epoch in range(num_epochs):
-        epoch_loss = 0
-        for batch in train_data:
-            inputs = batch["input_ids"].to(pruned_model.device)
-            attention_mask = batch["attention_mask"].to(pruned_model.device)
-            
-            # Teacher outputs
-            with torch.no_grad():
-                teacher_outputs = teacher_model(input_ids=inputs, attention_mask=attention_mask).logits
-            
-            # Student outputs
-            student_outputs = pruned_model(input_ids=inputs, attention_mask=attention_mask).logits
-            loss = loss_fn(student_outputs, teacher_outputs)
-            
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            
-            epoch_loss += loss.item()
-        
-        print(f"Epoch {epoch + 1}/{num_epochs}, Loss: {epoch_loss:.4f}")
+def conventional_retraining(lora_adapter, train_data, valid_data):
+    #TODO but not to now
+    return lora_adapter
 
-    return pruned_model
+def logit_kd_loss(teacher_logits, student_logits, temperature=1.0):
+    """
+    Compute the logit-based Knowledge Distillation (KD) loss.
+    
+    Args:
+        teacher_logits: Logits from the teacher model (B, S, V).
+        student_logits: Logits from the student model (B, S, V).
+        temperature: Softmax temperature.
+
+    Returns:
+        Logit-based KD loss.
+    """
+    teacher_probs = F.softmax(teacher_logits / temperature, dim=-1)
+    student_probs = F.log_softmax(student_logits / temperature, dim=-1)
+    loss = F.kl_div(student_probs, teacher_probs, reduction="batchmean") * (temperature ** 2)
+    return loss
+
+def intermediate_state_kd_loss(teacher_hidden_states, student_hidden_states, linear_mapping):
+    """
+    Compute intermediate state KD loss with linear transformation.
+    
+    Args:
+        teacher_hidden_states: List of teacher hidden states (post LayerNorm).
+        student_hidden_states: List of student hidden states.
+        linear_mapping: Shared linear transformation layer for student states.
+
+    Returns:
+        Intermediate state KD loss.
+    """
+    loss = 0.0
+    for teacher_state, student_state in zip(teacher_hidden_states, student_hidden_states):
+        transformed_student_state = linear_mapping(student_state)
+        loss += F.mse_loss(transformed_student_state, teacher_state)
+    return loss
+
+
+def knowledge_distill(lora_adapter, pruned_adapter, train_data, temperature=1.0, alpha=0.5):
+    """
+    Perform knowledge distillation with logit-based and intermediate state KD losses.
+    
+    Args:
+        lora_adapter: Teacher model.
+        pruned_adapter: Student model.
+        train_data: Training data.
+        temperature: Softmax temperature for logit KD loss.
+        alpha: Weighting coefficient for intermediate state KD loss.
+
+    Returns:
+        The distilled student model.
+    """
+    teacher_model = lora_adapter
+    student_model = pruned_adapter
+    optimizer = Adam(student_model.parameters(), lr=5e-5)
+    linear_mapping = nn.Linear(student_model.config.hidden_size, teacher_model.config.hidden_size).to(student_model.device)
+    
+    student_model.train()
+    teacher_model.eval()
+    total_loss = 0.0
+    
+    for batch in DataLoader(train_data, batch_size=32):
+        inputs = batch["input_ids"].to(student_model.device)
+        attention_mask = batch["attention_mask"].to(student_model.device)
+        
+        # Get teacher outputs
+        with torch.no_grad():
+            teacher_outputs = teacher_model(input_ids=inputs, attention_mask=attention_mask, output_hidden_states=True)
+            teacher_logits = teacher_outputs.logits
+            teacher_hidden_states = teacher_outputs.hidden_states
+        
+        # Get student outputs
+        student_outputs = student_model(input_ids=inputs, attention_mask=attention_mask, output_hidden_states=True)
+        student_logits = student_outputs.logits
+        student_hidden_states = student_outputs.hidden_states
+        
+        # Compute losses
+        loss_logits = logit_kd_loss(teacher_logits, student_logits, temperature)
+        loss_intermediate = intermediate_state_kd_loss(teacher_hidden_states[-1:], student_hidden_states[-1:], linear_mapping)
+        total_loss = loss_logits + alpha * loss_intermediate
+
+        # Optimize student model
+        optimizer.zero_grad()
+        total_loss.backward()
+        optimizer.step()
+
+    return student_model
 
 # TODO
 # setup the vary sparsity
-# Instead of performing one-shot pruning (pruning everything in a single step)
-# , iterative pruning splits the process into multiple iterations (T) to allow the model to gradually adapt.
-# iterative importance estimation and pruning -> iter 4 -> 
-# measure the initial validation loss and final validation loss with various iteration
-def prune_and_knowledge_distillation(train_data, valid_data, test_data, is_iter_prune = False, iter = 4):
-    """Prune the fine-tuned model and perform knowledge distillation."""
+#   Instead of performing one-shot pruning (pruning everything in a single step)
+#   , iterative pruning splits the process into multiple iterations (T) to allow the model to gradually adapt.
+def prune_and_knowledge_distillation(train_data, valid_data, test_data, is_iter_prune = False, is_process_kd = True, iter = 4):
+    """
+    Prune the fine-tuned model and perform knowledge distillation.
+    
+    Iterative Importance Estimation and Pruning
+        - iter num -> 4
+        - measure the initial validation loss and final validation loss with various iteration
+
+    Retraining
+        - conventional retraining, leveraging ground-truth labels
+        - knowledge distillation using supervision from the unpruned model (teacher)
+    """
     
     BASE_MODEL = "google/gemma-2b-it"
     ADAPTER_MODEL = "lora_adapter"
@@ -294,20 +359,26 @@ def prune_and_knowledge_distillation(train_data, valid_data, test_data, is_iter_
 
     if is_iter_prune:
         for i in range(iter):
-            d_s = 1
+            d_s = 1.0
             d_t = 0.5
             importance_iter = d_s - (i * ((d_s - d_t) / iter))
-            prune_iter = d_s - (i+1) * ((d_s - d_t) / iter)
+            prune_iter = d_s - (i + 1) * ((d_s - d_t) / iter)
 
             sparsity = {"width": prune_iter, "depth": prune_iter}
             pruned_adapter = structured_pruning(lora_adapter, calibration_dataset, sparsity, importance_iter)
-            kd_adapter = knowledge_distill(lora_adapter, pruned_adapter, train_data)
+            if is_process_kd:
+                kd_adapter = knowledge_distill(lora_adapter, pruned_adapter, train_data)
+            else:
+                kd_adapter = conventional_retraining(pruned_adapter, train_data, valid_data)
+            
             lora_adapter = kd_adapter
     else:
         sparsity = {"width": 0.5, "depth": 0.5}
         pruned_adapter = structured_pruning(lora_adapter, calibration_dataset, sparsity, 1)
-        kd_adapter = knowledge_distill(lora_adapter, pruned_adapter, train_data)
-    
+        if is_process_kd:
+            kd_adapter = knowledge_distill(lora_adapter, pruned_adapter, train_data)
+        else:
+            kd_adapter = conventional_retraining(pruned_adapter, train_data, valid_data)
     
     PRUNED_ADAPTER_MODEL = "pruned_lora_adapter"
     kd_adapter.save_pretrained(PRUNED_ADAPTER_MODEL)
