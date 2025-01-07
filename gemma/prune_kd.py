@@ -165,14 +165,17 @@ def compute_block_importance(model, data_loader, importance_iter):
         bi_scores[name] = 1 - cosine_similarity
     return bi_scores
 
-def width_pruning(lora_adapter, calibration_dataset, sparsity, importance_iter):
+def width_pruning(lora_adapter, calibration_dataset, width_sparsity, importance_iter):
     """
     Perform width pruning on the model, directly modifying its layers (heads, neurons, embedding channels).
     """
+    if width_sparsity == 0:
+        return lora_adapter
+    
     importance_scores = compute_width_importance_scores(lora_adapter, calibration_dataset, importance_iter)
-
+    
     for axis, scores in importance_scores.items():
-        threshold = torch.quantile(torch.tensor(list(scores.values())), sparsity["width"])
+        threshold = torch.quantile(torch.tensor(list(scores.values())), width_sparsity)
         
         for name, score in scores.items():
             if score < threshold:
@@ -202,9 +205,12 @@ def width_pruning(lora_adapter, calibration_dataset, sparsity, importance_iter):
 
     return lora_adapter
 
-def depth_pruning(lora_adapter, calibration_dataset, sparsity, importance_iter):
+def depth_pruning(lora_adapter, calibration_dataset, depth_sparsity, importance_iter):
+    if depth_sparsity == 0:
+        return lora_adapter
+    
     bi_scores = compute_block_importance(lora_adapter, calibration_dataset, importance_iter)
-    threshold = torch.quantile(torch.tensor(list(bi_scores.values())), sparsity)
+    threshold = torch.quantile(torch.tensor(list(bi_scores.values())), depth_sparsity)
 
     for name, act in bi_scores.items():
         if act < threshold:
@@ -403,6 +409,8 @@ def prune_and_knowledge_distillation(train_data, valid_data, test_data, is_iter_
     tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
     lora_adapter = PeftModel.from_pretrained(base_model, ADAPTER_MODEL, device_map="auto", torch_dtype=torch.float16)
     calibration_dataset = create_calibration_dataset(train_data, tokenizer, num_samples=1024, batch_size=32)
+    
+    
 
     if is_iter_prune:
         for i in range(iter):
@@ -410,7 +418,8 @@ def prune_and_knowledge_distillation(train_data, valid_data, test_data, is_iter_
             d_t = 0.5
             importance_iter = d_s - (i * ((d_s - d_t) / iter))
             prune_iter = d_s - (i + 1) * ((d_s - d_t) / iter)
-
+            #TODO
+            # sparsity have to have the list of iterated sparsity
             sparsity = {"width": prune_iter, "depth": prune_iter}
             pruned_adapter = structured_pruning(lora_adapter, calibration_dataset, sparsity, importance_iter)
             if is_process_kd:
@@ -420,7 +429,7 @@ def prune_and_knowledge_distillation(train_data, valid_data, test_data, is_iter_
             
             lora_adapter = kd_adapter
     else:
-        sparsity = {"width": 0.5, "depth": 0.5}
+        sparsity = {"width": 0.5, "depth": 0}
         pruned_adapter = structured_pruning(lora_adapter, calibration_dataset, sparsity, 1)
         if is_process_kd:
             kd_adapter = knowledge_distill(lora_adapter, pruned_adapter, train_data)
